@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.DS_Store
+.claude/
+
+# Large local sample images (kept out of history; real-file tests skip when absent)
+example_images_fei/
