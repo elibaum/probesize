@@ -22,7 +22,7 @@ def test_batch_continues_past_corrupt_file(tmp_path, capsys):
     # regression: one unreadable file used to raise UnidentifiedImageError
     # (an OSError, which _process_one didn't catch) and abort the whole
     # --batch run instead of reporting the file and moving on.
-    good = EXAMPLES / "site_2_10um0.3pA_try1.tif"
+    good = EXAMPLES / "2.tif"
     if good.exists():
         shutil.copy(good, tmp_path / "a_good.tif")
     (tmp_path / "b_corrupt.tif").write_bytes(b"this is not a tiff at all")

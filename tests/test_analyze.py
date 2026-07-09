@@ -118,7 +118,7 @@ def test_manual_calibration_is_adjustable_by_ratio(tmp_path):
 def test_manual_calibration_refuses_calibrated_results():
     from probesize.analyze import calibrate_result
 
-    path = EXAMPLES / "site_2_10um0.3pA_try1.tif"
+    path = EXAMPLES / "2.tif"
     if not path.exists():
         pytest.skip("sample file not present")
     real = analyze_image(path, AnalysisParams())
@@ -129,14 +129,14 @@ def test_manual_calibration_refuses_calibrated_results():
 
 
 def test_fallback_pixel_size_never_overrides_embedded_calibration():
-    path = EXAMPLES / "site_2_10um0.3pA_try1.tif"
+    path = EXAMPLES / "2.tif"
     if not path.exists():
         pytest.skip("sample file not present")
 
     result = analyze_image(path, AnalysisParams(fallback_pixel_size_nm=99.0))
 
     assert result.calibration == "metadata"
-    assert result.pixel_size_nm == pytest.approx(0.1953, rel=1e-3)
+    assert result.pixel_size_nm == pytest.approx(0.3906, rel=1e-3)
 
 
 def test_zero_pixel_size_raises_rather_than_being_ignored(tmp_path):
@@ -161,7 +161,7 @@ def test_default_params_are_not_shared_between_calls(tmp_path):
 
 @pytest.mark.skipif(not EXAMPLES.exists(), reason="example_images not present")
 def test_runs_on_real_example_image():
-    path = EXAMPLES / "site_2_10um0.3pA_try1.tif"
+    path = EXAMPLES / "2.tif"
     if not path.exists():
         pytest.skip("sample file not present")
 
@@ -169,9 +169,9 @@ def test_runs_on_real_example_image():
 
     assert result.pixel_size_nm > 0
     assert result.n_edge_points_found > 0
-    # this particular sample is a soft/defocused alignment shot, not a
-    # sharp resolution-test image, so just check the pipeline produces a
-    # sane, finite, positive number rather than asserting a specific value.
+    # end-to-end smoke test on real instrument data: just check the pipeline
+    # produces a sane, finite, positive resolution rather than a specific
+    # value (which depends on detector/threshold choices).
     assert np.isfinite(result.resolution_mean_nm)
     assert result.resolution_mean_nm > 0
 

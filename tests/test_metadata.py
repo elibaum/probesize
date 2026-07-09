@@ -28,17 +28,17 @@ def _write_fei_tiff(path: Path, pixel_width_m: float, scan_h: int, file_h: int, 
 
 @pytest.mark.skipif(not EXAMPLES.exists(), reason="example_images not present")
 def test_reads_pixel_size_and_footer_from_real_zeiss_tif():
-    path = EXAMPLES / "site_2_10um0.3pA_try1.tif"
+    path = EXAMPLES / "2.tif"
     if not path.exists():
         pytest.skip("sample file not present")
 
     meta = read_metadata(path)
 
     assert meta.vendor == "Zeiss (ImageTags)"
-    assert meta.pixel_size_nm == pytest.approx(0.1953, rel=1e-3)
-    assert meta.scan_width_px == 512
-    assert meta.scan_height_px == 512
-    assert meta.footer_height_px == 48
+    assert meta.pixel_size_nm == pytest.approx(0.3906, rel=1e-3)
+    assert meta.scan_width_px == 1024
+    assert meta.scan_height_px == 1024
+    assert meta.footer_height_px == 96
 
 
 # -- FEI / Thermo -----------------------------------------------------------
