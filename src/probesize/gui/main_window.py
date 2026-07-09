@@ -58,6 +58,7 @@ class MainWindow(QMainWindow):
         self._raw_result: Optional[AnalysisResult] = None
         self.batch_results: dict[str, AnalysisResult] = {}  # raw (lenient-floor) results
         self._current_batch_name: Optional[str] = None
+        self._restore_batch_selection: Optional[str] = None
         self._thread = None
         self._worker = None
         self._progress_dialog: Optional[QProgressDialog] = None
@@ -212,14 +213,15 @@ class MainWindow(QMainWindow):
     def open_settings(self) -> None:
         dialog = SettingsDialog(self.params, self)
         if dialog.exec():
-            self.params = dialog.get_params()
+            new_params = dialog.get_params()
+            if new_params == self.params:
+                return  # nothing changed; keep all cached results
+            self.params = new_params
             self.sensitivity_description.setText(describe_sensitivity(self.params))
-            # keep the main-screen mode selector in sync; setCurrentText only
-            # emits (and re-runs via _on_mode_changed) if the mode changed
+            # keep the main-screen mode selector in sync; _on_mode_changed
+            # no-ops because params.detection_mode is already updated
             self.mode_combo.setCurrentText(self.params.detection_mode)
-            # structural parameters (mode, radii, spacing, ...) may have
-            # changed, so cached lenient-floor results no longer apply
-            self._invalidate_cached_results()
+            self._reanalyze_after_structural_change()
 
     def _invalidate_cached_results(self) -> None:
         """Drop everything computed under now-stale structural parameters:
@@ -231,6 +233,20 @@ class MainWindow(QMainWindow):
         self.batch_table.setRowCount(0)
         self._current_batch_name = None
 
+    def _reanalyze_after_structural_change(self) -> None:
+        """Structural parameters (detection mode, radii, spacing, ...)
+        changed: cached lenient-floor results no longer apply. Re-analyze
+        whatever is loaded -- the whole batch if one is loaded (repopulating
+        the table rather than losing it), otherwise the current image."""
+        batch_paths = [Path(raw.image_path) for raw in self.batch_results.values()]
+        selected = self._current_batch_name
+        self._invalidate_cached_results()
+        if batch_paths:
+            self._restore_batch_selection = selected
+            self._start_batch(batch_paths)
+        elif self.current_result is not None:
+            self._run_analysis(Path(self.current_result.image_path))
+
     # -- detection mode (main-screen selector) --------------------------------
 
     def _on_mode_changed(self, mode: str) -> None:
@@ -240,11 +256,7 @@ class MainWindow(QMainWindow):
         self.sensitivity_description.setText(
             describe_sensitivity(apply_sensitivity(self.params, self.sensitivity_slider.value()))
         )
-        # switching detector is a structural change: detection/fitting must
-        # be redone, so the cached lenient-floor results no longer apply
-        self._invalidate_cached_results()
-        if self.current_result is not None:
-            self._run_analysis(Path(self.current_result.image_path))
+        self._reanalyze_after_structural_change()
 
     # -- region of interest ----------------------------------------------------
 
@@ -466,11 +478,10 @@ class MainWindow(QMainWindow):
         if not paths:
             QMessageBox.information(self, "No images found", f"No supported images found in {folder}")
             return
+        self._invalidate_cached_results()
+        self._start_batch(paths)
 
-        self.batch_results.clear()
-        self.batch_table.setRowCount(0)
-        self._current_batch_name = None
-
+    def _start_batch(self, paths: list[Path]) -> None:
         self._progress_dialog = QProgressDialog("Analyzing batch...", "Cancel", 0, len(paths), self)
         self._progress_dialog.setWindowModality(Qt.WindowModal)
 
@@ -519,6 +530,15 @@ class MainWindow(QMainWindow):
             self._progress_dialog.close()
             self._progress_dialog = None
         self.statusBar().showMessage(f"Batch complete: {len(self.batch_results)} image(s) analyzed.")
+        # after a re-analysis triggered by a mode/settings change, put the
+        # user back on the image they were viewing
+        if self._restore_batch_selection:
+            name = self._restore_batch_selection
+            self._restore_batch_selection = None
+            for row in range(self.batch_table.rowCount()):
+                if self.batch_table.item(row, 0).text() == name:
+                    self.batch_table.selectRow(row)  # triggers _on_batch_row_selected
+                    break
 
     def _on_batch_row_selected(self) -> None:
         rows = self.batch_table.selectionModel().selectedRows()

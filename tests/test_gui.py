@@ -38,6 +38,27 @@ def sample_result():
     return analyze_image(path, AnalysisParams(detection_mode="particles"))
 
 
+def _result_with_path(result, name):
+    """A shallow copy of an AnalysisResult under a different filename, so
+    several distinct batch entries can share one analyzed sample."""
+    import dataclasses
+
+    return dataclasses.replace(result, image_path=Path(name))
+
+
+class _StubDialog:
+    """Stand-in for SettingsDialog that returns a preset params object."""
+
+    def __init__(self, params):
+        self._params = params
+
+    def exec(self):
+        return True
+
+    def get_params(self):
+        return self._params
+
+
 def test_main_window_renders_result(qapp, sample_result):
     win = MainWindow()
     win.params.detection_mode = "particles"
@@ -231,7 +252,7 @@ def test_closed_tool_dialogs_are_not_updated(qapp, sample_result):
     win._on_sensitivity_released()
 
 
-def test_mode_selector_reanalyzes_and_invalidates_cache(qapp, sample_result, monkeypatch):
+def test_mode_selector_reanalyzes_single_image_and_invalidates_cache(qapp, sample_result, monkeypatch):
     win = MainWindow()
     win.mode_combo.setCurrentText("edge")  # start in edge, no re-run (no image yet)
     win._on_analysis_finished(sample_result)
@@ -247,25 +268,43 @@ def test_mode_selector_reanalyzes_and_invalidates_cache(qapp, sample_result, mon
     assert reruns == [(Path(sample_result.image_path), "particles")]
 
 
-def test_settings_dialog_mode_change_syncs_main_selector(qapp, sample_result, monkeypatch):
+def test_mode_change_reanalyzes_whole_batch(qapp, sample_result, monkeypatch):
+    # regression: switching detection mode with a batch loaded used to clear
+    # the batch table (images "disappeared") instead of re-analyzing them
     win = MainWindow()
     win.mode_combo.setCurrentText("edge")
+    win._on_batch_file_done("a.tif", _result_with_path(sample_result, "a.tif"))
+    win._on_batch_file_done("b.tif", _result_with_path(sample_result, "b.tif"))
+    win._on_batch_file_done("c.tif", _result_with_path(sample_result, "c.tif"))
+    assert win.batch_table.rowCount() == 3
 
-    class _Dialog:
-        def __init__(self, params, parent):
-            self._p = params
+    started = []
+    monkeypatch.setattr(win, "_start_batch", lambda paths: started.append([p.name for p in paths]))
 
-        def exec(self):
-            return True
+    win.mode_combo.setCurrentText("particles")
 
-        def get_params(self):
-            self._p.detection_mode = "particles"
-            return self._p
+    assert win.params.detection_mode == "particles"
+    assert len(started) == 1
+    assert sorted(started[0]) == ["a.tif", "b.tif", "c.tif"]  # all three re-analyzed
 
-    monkeypatch.setattr("probesize.gui.main_window.SettingsDialog", _Dialog)
+
+def test_settings_dialog_mode_change_syncs_main_selector(qapp, sample_result, monkeypatch):
+    import copy
+
+    win = MainWindow()
+    win.mode_combo.setCurrentText("edge")
+    monkeypatch.setattr(win, "_run_analysis", lambda path: None)
+
+    def _changed_params(params, parent):
+        p = copy.copy(params)  # real SettingsDialog copies, then mutates
+        p.detection_mode = "particles"
+        return _StubDialog(p)
+
+    monkeypatch.setattr("probesize.gui.main_window.SettingsDialog", _changed_params)
     win.open_settings()
 
     assert win.mode_combo.currentText() == "particles"
+    assert win.params.detection_mode == "particles"
 
 
 def test_polar_plot_scroll_zooms_radial_axis(qapp, sample_result):
@@ -480,31 +519,50 @@ def test_locked_region_survives_rerender_as_static_patch(qapp, sample_result):
     assert win.params.region == (100.0, 400.0, 100.0, 400.0)
 
 
-def test_settings_change_clears_stale_batch_table_rows(qapp, sample_result, monkeypatch):
-    # regression: accepting the settings dialog cleared batch_results but
-    # left the table rows -- stale numbers whose rows silently did nothing
+def test_settings_change_reanalyzes_loaded_batch(qapp, sample_result, monkeypatch):
+    # a structural settings change with a batch loaded re-analyzes the whole
+    # batch (rather than clearing it or leaving stale rows)
+    import copy
+
     win = MainWindow()
-    win.params.detection_mode = "particles"
-    win._on_batch_file_done("2.tif", sample_result)
-    win._current_batch_name = "2.tif"
-    assert win.batch_table.rowCount() == 1
+    win.mode_combo.setCurrentText("edge")
+    win._on_batch_file_done("a.tif", _result_with_path(sample_result, "a.tif"))
+    win._on_batch_file_done("b.tif", _result_with_path(sample_result, "b.tif"))
 
-    class _AcceptingDialog:
-        def __init__(self, params, parent):
-            self._params = params
+    started = []
+    monkeypatch.setattr(win, "_start_batch", lambda paths: started.append([p.name for p in paths]))
 
-        def exec(self):
-            return True
+    def _changed(params, parent):
+        p = copy.copy(params)
+        p.min_radius_nm = params.min_radius_nm + 1.0  # a genuine structural change
+        return _StubDialog(p)
 
-        def get_params(self):
-            return self._params
-
-    monkeypatch.setattr("probesize.gui.main_window.SettingsDialog", _AcceptingDialog)
+    monkeypatch.setattr("probesize.gui.main_window.SettingsDialog", _changed)
     win.open_settings()
 
-    assert win.batch_table.rowCount() == 0
-    assert win.batch_results == {}
-    assert win._current_batch_name is None
+    assert len(started) == 1
+    assert sorted(started[0]) == ["a.tif", "b.tif"]
+
+
+def test_settings_dialog_no_change_is_a_noop(qapp, sample_result, monkeypatch):
+    # accepting the dialog without changing anything must not blow away the
+    # loaded batch or trigger a re-analysis
+    import copy
+
+    win = MainWindow()
+    win.mode_combo.setCurrentText("edge")
+    win._on_batch_file_done("a.tif", _result_with_path(sample_result, "a.tif"))
+
+    started = []
+    monkeypatch.setattr(win, "_start_batch", lambda paths: started.append(paths))
+    monkeypatch.setattr(
+        "probesize.gui.main_window.SettingsDialog",
+        lambda params, parent: _StubDialog(copy.copy(params)),  # identical params
+    )
+    win.open_settings()
+
+    assert started == []
+    assert win.batch_table.rowCount() == 1
 
 
 def test_reopening_tool_dialog_closes_previous_instance(qapp, sample_result):
@@ -624,22 +682,20 @@ def test_manual_calibration_applies_instantly_and_converts_to_nm(qapp, tmp_path,
 
 
 def test_settings_change_invalidates_cached_raw_result(qapp, sample_result, monkeypatch):
+    import copy
+
     win = MainWindow()
     win.params.detection_mode = "particles"
     win._on_analysis_finished(sample_result)
     assert win._raw_result is not None
+    monkeypatch.setattr(win, "_run_analysis", lambda path: None)  # avoid a real thread
 
-    class _AcceptingDialog:
-        def __init__(self, params, parent):
-            self._params = params
+    def _changed(params, parent):
+        p = copy.copy(params)
+        p.min_radius_nm = params.min_radius_nm + 1.0
+        return _StubDialog(p)
 
-        def exec(self):
-            return True
-
-        def get_params(self):
-            return self._params
-
-    monkeypatch.setattr("probesize.gui.main_window.SettingsDialog", _AcceptingDialog)
+    monkeypatch.setattr("probesize.gui.main_window.SettingsDialog", _changed)
     win.open_settings()
 
     assert win._raw_result is None
