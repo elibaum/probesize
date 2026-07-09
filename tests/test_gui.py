@@ -288,6 +288,72 @@ def test_mode_change_reanalyzes_whole_batch(qapp, sample_result, monkeypatch):
     assert sorted(started[0]) == ["a.tif", "b.tif", "c.tif"]  # all three re-analyzed
 
 
+def test_criterion_dropdown_defaults_to_25_75(qapp):
+    win = MainWindow()
+
+    assert win.criterion_combo.currentText() == "25–75%"
+    assert (win.params.criterion_lo, win.params.criterion_hi) == (0.25, 0.75)
+
+
+def test_criterion_switch_rescales_instantly_without_rerun(qapp, sample_result, monkeypatch):
+    from probesize.fitting import resolution_from_sigma
+
+    win = MainWindow()
+    win.params.detection_mode = "particles"
+    win._on_batch_file_done("a.tif", _result_with_path(sample_result, "a.tif"))
+    win._on_analysis_finished(sample_result)
+    median_2575 = win.current_result.resolution_median_nm
+
+    reruns = []
+    monkeypatch.setattr(win, "_run_analysis", lambda path: reruns.append(path))
+    monkeypatch.setattr(win, "_start_batch", lambda paths: reruns.append(paths))
+
+    win.criterion_combo.setCurrentIndex(1)  # 20–80%
+
+    assert reruns == []  # pure refilter of cached fits
+    assert (win.params.criterion_lo, win.params.criterion_hi) == (0.20, 0.80)
+    # the two criteria differ by an exact, sigma-independent factor
+    factor = resolution_from_sigma(1.0, 0.20, 0.80) / resolution_from_sigma(1.0, 0.25, 0.75)
+    assert win.current_result.resolution_median_nm == pytest.approx(median_2575 * factor)
+    # batch row was refreshed with the new criterion too
+    assert win.batch_table.item(0, 1).text().startswith(
+        f"{win.current_result.resolution_median_nm:.2f}"[:3]
+    )
+
+    # switching back restores the original numbers
+    win.criterion_combo.setCurrentIndex(0)
+    assert win.current_result.resolution_median_nm == pytest.approx(median_2575)
+
+
+def test_custom_criterion_from_settings_shown_in_dropdown(qapp, monkeypatch):
+    import copy
+
+    win = MainWindow()
+
+    def _custom(params, parent):
+        p = copy.copy(params)
+        p.criterion_lo, p.criterion_hi = 0.30, 0.70
+        return _StubDialog(p)
+
+    monkeypatch.setattr("probesize.gui.main_window.SettingsDialog", _custom)
+    win.open_settings()
+
+    assert win.criterion_combo.currentText() == "custom (30–70%)"
+    assert win.criterion_combo.currentData() == (0.30, 0.70)
+
+    # going back to a preset via settings selects the preset and drops Custom
+    def _preset(params, parent):
+        p = copy.copy(params)
+        p.criterion_lo, p.criterion_hi = 0.20, 0.80
+        return _StubDialog(p)
+
+    monkeypatch.setattr("probesize.gui.main_window.SettingsDialog", _preset)
+    win.open_settings()
+
+    assert win.criterion_combo.currentText() == "20–80%"
+    assert win.criterion_combo.count() == 2
+
+
 def test_settings_dialog_mode_change_syncs_main_selector(qapp, sample_result, monkeypatch):
     import copy
 

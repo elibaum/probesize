@@ -103,7 +103,11 @@ Adding another vendor is one small parser function in
 ## The GUI in more detail
 
 - **Detection mode** — switch between the edge and particle detectors;
-  switching re-analyzes the current image.
+  switching re-analyzes the current image (or the whole loaded batch).
+- **Edge-width criterion** — dropdown to switch between the 25–75% and
+  20–80% conventions; the change is a pure rescale of the stored fits, so
+  all numbers, plots, and batch rows update instantly. Other percentile
+  pairs can be set in **Analysis → Settings...** (shown as *custom* here).
 - **Region of interest** — check *Edit region*, drag a rectangle over the
   area you care about (move/resize by its handles), uncheck to lock it. Only
   profiles inside count toward the statistics; everything else is excluded

@@ -45,6 +45,12 @@ IMAGE_SUFFIXES = {".tif", ".tiff", ".png", ".jpg", ".jpeg", ".bmp"}
 # post-hoc refilter (see analyze.refilter_result).
 _LENIENT_FLOOR = 100
 
+# Edge-width criterion presets offered in the main-screen dropdown.
+_CRITERION_PRESETS = (
+    ("25–75%", 0.25, 0.75),
+    ("20–80%", 0.20, 0.80),
+)
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -74,11 +80,27 @@ class MainWindow(QMainWindow):
         self.mode_combo.addItems(["edge", "particles"])
         self.mode_combo.setCurrentText(self.params.detection_mode)
         self.mode_combo.currentTextChanged.connect(self._on_mode_changed)
+
+        # edge-width criterion presets: (label, lo, hi). Switching is instant
+        # (the resolution is recomputed from each stored fit's sigma).
+        self.criterion_combo = QComboBox()
+        for label, lo, hi in _CRITERION_PRESETS:
+            self.criterion_combo.addItem(label, (lo, hi))
+        self._sync_criterion_combo()
+        self.criterion_combo.currentIndexChanged.connect(self._on_criterion_changed)
+
         mode_group = QGroupBox("Detection mode")
-        mode_layout = QHBoxLayout(mode_group)
-        mode_layout.addWidget(self.mode_combo)
-        mode_layout.addWidget(QLabel("edge = generic edges · particles = round particles"))
-        mode_layout.addStretch()
+        mode_layout = QVBoxLayout(mode_group)
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(self.mode_combo)
+        mode_row.addWidget(QLabel("edge = generic edges · particles = round particles"))
+        mode_row.addStretch()
+        mode_layout.addLayout(mode_row)
+        criterion_row = QHBoxLayout()
+        criterion_row.addWidget(QLabel("Edge-width criterion:"))
+        criterion_row.addWidget(self.criterion_combo)
+        criterion_row.addStretch()
+        mode_layout.addLayout(criterion_row)
 
         # shown only when the displayed image has no embedded calibration:
         # lets the user supply a pixel size manually (applied instantly as a
@@ -218,9 +240,10 @@ class MainWindow(QMainWindow):
                 return  # nothing changed; keep all cached results
             self.params = new_params
             self.sensitivity_description.setText(describe_sensitivity(self.params))
-            # keep the main-screen mode selector in sync; _on_mode_changed
+            # keep the main-screen selectors in sync; _on_mode_changed
             # no-ops because params.detection_mode is already updated
             self.mode_combo.setCurrentText(self.params.detection_mode)
+            self._sync_criterion_combo()
             self._reanalyze_after_structural_change()
 
     def _invalidate_cached_results(self) -> None:
@@ -257,6 +280,45 @@ class MainWindow(QMainWindow):
             describe_sensitivity(apply_sensitivity(self.params, self.sensitivity_slider.value()))
         )
         self._reanalyze_after_structural_change()
+
+    # -- edge-width criterion --------------------------------------------------
+
+    def _sync_criterion_combo(self) -> None:
+        """Reflect params.criterion_lo/hi in the dropdown without triggering
+        the change handler; values matching no preset get a Custom entry
+        (e.g. after being set in the Settings dialog)."""
+        current = (self.params.criterion_lo, self.params.criterion_hi)
+        self.criterion_combo.blockSignals(True)
+        try:
+            while self.criterion_combo.count() > len(_CRITERION_PRESETS):
+                self.criterion_combo.removeItem(self.criterion_combo.count() - 1)
+            for i in range(self.criterion_combo.count()):
+                if self.criterion_combo.itemData(i) == current:
+                    self.criterion_combo.setCurrentIndex(i)
+                    return
+            self.criterion_combo.addItem(
+                f"custom ({current[0] * 100:g}–{current[1] * 100:g}%)", current
+            )
+            self.criterion_combo.setCurrentIndex(self.criterion_combo.count() - 1)
+        finally:
+            self.criterion_combo.blockSignals(False)
+
+    def _on_criterion_changed(self, index: int) -> None:
+        data = self.criterion_combo.itemData(index)
+        if data is None:
+            return
+        lo, hi = data
+        if (lo, hi) == (self.params.criterion_lo, self.params.criterion_hi):
+            return
+        self.params.criterion_lo, self.params.criterion_hi = lo, hi
+        if self._raw_result is not None:
+            # the criterion only rescales each fit's reported width, so this
+            # is a pure refilter of the cached fits -- no re-analysis
+            self._display_refiltered(self._raw_result)
+            self._refresh_batch_rows()
+            self.statusBar().showMessage(
+                f"Edge-width criterion set to {self.criterion_combo.currentText()} — recomputed instantly."
+            )
 
     # -- region of interest ----------------------------------------------------
 
