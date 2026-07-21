@@ -96,3 +96,30 @@ def test_region_flag_validation(capsys):
     with pytest.raises(SystemExit):
         main(["ignored.png", "--region", "100,100,50,200"])  # X1 < X0
     assert "X1>X0" in capsys.readouterr().err
+
+
+def test_batch_writes_summary_csv(tmp_path, capsys):
+    import csv as _csv
+
+    for name in ("a.png", "b.png"):
+        _write_uncalibrated_edge_png(tmp_path / name)
+    out = tmp_path / "results"
+
+    rc = main(["--batch", str(tmp_path), "--out", str(out), "--no-plots"])
+
+    assert rc == 0
+    summary = out / "summary.csv"
+    assert summary.exists()
+    with open(summary, newline="") as f:
+        rows = list(_csv.DictReader(f))
+    assert sorted(r["image"] for r in rows) == ["a.png", "b.png"]
+    assert all(r["resolution_nm_ci95_low"] for r in rows)
+
+
+def test_single_image_output_includes_ci(tmp_path, capsys):
+    image = tmp_path / "edge.png"
+    _write_uncalibrated_edge_png(image)
+
+    main([str(image), "--no-plots", "-s"])
+
+    assert "95% CI" in capsys.readouterr().out

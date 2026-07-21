@@ -139,6 +139,11 @@ class AnalysisResult:
     n_edge_points_found: int
     snr_mean: float
     asymmetry_mean: float
+    # 95% bootstrap confidence interval on the median resolution -- the
+    # uncertainty of the estimate itself (distinct from the MAD, which is
+    # the spread of individual profile measurements)
+    resolution_ci_low_nm: float = float("nan")
+    resolution_ci_high_nm: float = float("nan")
     units: str = "nm"
     calibration: str = "metadata"
     # region of interest the acceptance was evaluated under, as
@@ -337,6 +342,35 @@ def calibrate_result(result: AnalysisResult, pixel_size_nm: float) -> AnalysisRe
     )
 
 
+_BOOTSTRAP_SAMPLES = 2000
+_CI_LEVEL = 0.95
+
+
+def bootstrap_median_ci(
+    values: np.ndarray, level: float = _CI_LEVEL, n_samples: int = _BOOTSTRAP_SAMPLES
+) -> tuple[float, float]:
+    """Percentile bootstrap confidence interval for the median of `values`.
+
+    This is the uncertainty of the resolution *estimate* (how well the
+    median is pinned down by this many profiles), as opposed to the MAD,
+    which describes the spread of individual profile measurements. Uses a
+    fixed RNG seed so a given set of profiles always yields the same
+    interval (reproducible reports). Returns (nan, nan) for empty input and
+    a zero-width interval at the value for a single measurement.
+    """
+    values = np.asarray(values, dtype=float)
+    if values.size == 0:
+        return (float("nan"), float("nan"))
+    if values.size == 1:
+        return (float(values[0]), float(values[0]))
+    rng = np.random.default_rng(0)
+    resamples = rng.choice(values, size=(n_samples, values.size), replace=True)
+    medians = np.median(resamples, axis=1)
+    alpha = (1.0 - level) / 2.0
+    lo, hi = np.percentile(medians, [100 * alpha, 100 * (1 - alpha)])
+    return (float(lo), float(hi))
+
+
 def _assemble_result(
     path: Path,
     pixel_size_nm: float,
@@ -358,6 +392,7 @@ def _assemble_result(
         mad_nm = float(1.4826 * np.median(np.abs(resolutions - median_nm)))
     else:
         median_nm = mad_nm = float("nan")
+    ci_low_nm, ci_high_nm = bootstrap_median_ci(resolutions)
 
     return AnalysisResult(
         image_path=path,
@@ -366,6 +401,8 @@ def _assemble_result(
         resolution_std_nm=float(np.std(resolutions)) if resolutions.size else float("nan"),
         resolution_median_nm=median_nm,
         resolution_mad_nm=mad_nm,
+        resolution_ci_low_nm=ci_low_nm,
+        resolution_ci_high_nm=ci_high_nm,
         n_profiles_analyzed=len(accepted),
         n_edge_points_found=n_edge_points,
         snr_mean=float(np.nanmean(snrs)) if snrs.size else float("nan"),

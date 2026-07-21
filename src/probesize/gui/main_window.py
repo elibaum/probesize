@@ -28,7 +28,14 @@ from PySide6.QtWidgets import (
 )
 
 from ..analyze import AnalysisParams, AnalysisResult, calibrate_result, refilter_result
-from ..report import save_annotated_image, save_histogram, save_polar_plot, write_json_report, write_text_report
+from ..report import (
+    save_annotated_image,
+    save_histogram,
+    save_polar_plot,
+    write_csv_summary,
+    write_json_report,
+    write_text_report,
+)
 from .about_dialog import AboutDialog
 from .canvas import ImageCanvas
 from .plot_dialogs import HistogramDialog, PolarDialog
@@ -217,6 +224,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction("Open Batch Folder...", self.open_batch_folder)
         file_menu.addSeparator()
         file_menu.addAction("Save Results...", self.save_results)
+        file_menu.addAction("Export Batch Summary (CSV)...", self.export_batch_csv)
         file_menu.addSeparator()
         file_menu.addAction("Exit", self.close)
 
@@ -660,6 +668,28 @@ class MainWindow(QMainWindow):
         save_histogram(self.current_result, out_dir / f"{stem}_histogram.png")
         save_polar_plot(self.current_result, out_dir / f"{stem}_polar.png")
         self.statusBar().showMessage(f"Saved results to {out_dir}")
+
+    def export_batch_csv(self) -> None:
+        if not self.batch_results:
+            QMessageBox.information(
+                self, "No batch loaded", "Open a batch folder first (File > Open Batch Folder...)."
+            )
+            return
+        path_str, _ = QFileDialog.getSaveFileName(
+            self, "Export batch summary", "summary.csv", "CSV files (*.csv)"
+        )
+        if not path_str:
+            return
+        # export the results as currently displayed: refiltered at the active
+        # thresholds/criterion/region and manual calibration, in table order
+        rows = []
+        for row in range(self.batch_table.rowCount()):
+            name = self.batch_table.item(row, 0).text()
+            raw = self.batch_results.get(name)
+            if raw is not None:
+                rows.append(refilter_result(self._apply_manual_calibration(raw), self.params))
+        write_csv_summary(rows, path_str)
+        self.statusBar().showMessage(f"Exported {len(rows)} image(s) to {path_str}")
 
     # -- shutdown -------------------------------------------------------------
 

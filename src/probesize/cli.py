@@ -18,7 +18,14 @@ import sys
 from pathlib import Path
 
 from .analyze import AnalysisParams, analyze_image
-from .report import save_annotated_image, save_histogram, save_polar_plot, write_json_report, write_text_report
+from .report import (
+    save_annotated_image,
+    save_histogram,
+    save_polar_plot,
+    write_csv_summary,
+    write_json_report,
+    write_text_report,
+)
 
 IMAGE_SUFFIXES = {".tif", ".tiff", ".png", ".jpg", ".jpeg", ".bmp"}
 
@@ -90,7 +97,9 @@ def _parse_region(text: str) -> tuple[float, float, float, float]:
     return (y0, y1, x0, x1)
 
 
-def _process_one(path: Path, out_dir: Path, params: AnalysisParams, make_plots: bool, script_mode: bool) -> int:
+def _process_one(path: Path, out_dir: Path, params: AnalysisParams, make_plots: bool, script_mode: bool):
+    """Analyze one image and write its reports. Returns the AnalysisResult,
+    or None if the file could not be read (already reported to stderr)."""
     try:
         result = analyze_image(path, params)
     except (ValueError, OSError) as exc:
@@ -98,7 +107,7 @@ def _process_one(path: Path, out_dir: Path, params: AnalysisParams, make_plots: 
         # UnidentifiedImageError, an OSError subclass) -- report and keep
         # going so one bad file doesn't abort a whole --batch run
         print(f"{path}: {exc}", file=sys.stderr)
-        return 1
+        return None
 
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = path.stem
@@ -112,17 +121,21 @@ def _process_one(path: Path, out_dir: Path, params: AnalysisParams, make_plots: 
 
     units = result.units
     uncalibrated_note = "" if units == "nm" else " [uncalibrated: pixel units]"
+    ci = f"[95% CI {result.resolution_ci_low_nm:.2f}-{result.resolution_ci_high_nm:.2f} {units}]"
     if script_mode:
-        print(f"Resolution = {result.resolution_median_nm:.2f} +/- {result.resolution_mad_nm:.2f} {units} (median){uncalibrated_note}")
+        print(
+            f"Resolution = {result.resolution_median_nm:.2f} +/- {result.resolution_mad_nm:.2f} {units} "
+            f"(median) {ci}{uncalibrated_note}"
+        )
     else:
         print(
             f"{path.name}: resolution = {result.resolution_median_nm:.2f} +/- {result.resolution_mad_nm:.2f} {units} (median) "
-            f"[{result.resolution_mean_nm:.2f} +/- {result.resolution_std_nm:.2f} {units} mean] "
+            f"{ci} [{result.resolution_mean_nm:.2f} +/- {result.resolution_std_nm:.2f} {units} mean] "
             f"(profiles analyzed = {result.n_profiles_analyzed}, "
             f"S/N = {result.snr_mean:.1f}, asymmetry = {result.asymmetry_mean:.3f})"
             f"{uncalibrated_note}"
         )
-    return 0
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -162,12 +175,22 @@ def main(argv: list[str] | None = None) -> int:
     if args.batch:
         batch_dir = Path(args.batch)
         out_dir = Path(args.out) if args.out else batch_dir / "results"
+        results = []
         for image_path in _iter_images(batch_dir):
-            status |= _process_one(image_path, out_dir, params, not args.no_plots, args.script_mode)
+            result = _process_one(image_path, out_dir, params, not args.no_plots, args.script_mode)
+            if result is None:
+                status = 1
+            else:
+                results.append(result)
+        if results:
+            csv_path = out_dir / "summary.csv"
+            write_csv_summary(results, csv_path)
+            if not args.script_mode:
+                print(f"Wrote summary of {len(results)} image(s) to {csv_path}")
     else:
         input_path = Path(args.input)
         out_dir = Path(args.out) if args.out else input_path.parent
-        status = _process_one(input_path, out_dir, params, not args.no_plots, args.script_mode)
+        status = 0 if _process_one(input_path, out_dir, params, not args.no_plots, args.script_mode) else 1
 
     return status
 

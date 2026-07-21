@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import math
 from pathlib import Path
+from typing import Iterable
 
 import matplotlib
 
@@ -27,11 +29,55 @@ def summary_dict(result: AnalysisResult) -> dict:
         "resolution_nm_std": result.resolution_std_nm,
         "resolution_nm_median": result.resolution_median_nm,
         "resolution_nm_mad": result.resolution_mad_nm,
+        "resolution_nm_ci95_low": result.resolution_ci_low_nm,
+        "resolution_nm_ci95_high": result.resolution_ci_high_nm,
         "profiles_analyzed": result.n_profiles_analyzed,
         "edge_points_found": result.n_edge_points_found,
         "snr_mean": result.snr_mean,
         "asymmetry_mean": result.asymmetry_mean,
     }
+
+
+def _csv_row(result: AnalysisResult) -> dict:
+    """Flat, spreadsheet-friendly row for one result. `image` is the file
+    name only (not the full path) so a summary is easy to read and sort."""
+    d = summary_dict(result)
+    d["image"] = Path(result.image_path).name
+    d["region_row_col"] = ";".join(f"{v:g}" for v in result.region) if result.region else ""
+    d["vendor"] = result.metadata.vendor if result.metadata else ""
+    return d
+
+
+# stable column order for the summary CSV
+_CSV_COLUMNS = [
+    "image",
+    "units",
+    "calibration",
+    "vendor",
+    "pixel_size_nm",
+    "resolution_nm_median",
+    "resolution_nm_mad",
+    "resolution_nm_ci95_low",
+    "resolution_nm_ci95_high",
+    "resolution_nm_mean",
+    "resolution_nm_std",
+    "profiles_analyzed",
+    "edge_points_found",
+    "snr_mean",
+    "asymmetry_mean",
+    "region_row_col",
+]
+
+
+def write_csv_summary(results: Iterable[AnalysisResult], out_path: Path | str) -> None:
+    """Write one row per result to a CSV summary -- the artifact for
+    tracking resolution across a batch or over time (open in any
+    spreadsheet). Column order is fixed by :data:`_CSV_COLUMNS`."""
+    with open(out_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=_CSV_COLUMNS, extrasaction="ignore")
+        writer.writeheader()
+        for result in results:
+            writer.writerow(_csv_row(result))
 
 
 def write_json_report(result: AnalysisResult, out_path: Path | str) -> None:
@@ -59,6 +105,7 @@ def write_text_report(result: AnalysisResult, out_path: Path | str) -> None:
         pixel_size_line,
         f"Resolution = {d['resolution_nm_mean']:.2f} +/- {d['resolution_nm_std']:.2f} {units} (mean +/- std)",
         f"Resolution = {d['resolution_nm_median']:.2f} +/- {d['resolution_nm_mad']:.2f} {units} (median +/- robust MAD-based std)",
+        f"Resolution 95% CI = [{d['resolution_nm_ci95_low']:.2f}, {d['resolution_nm_ci95_high']:.2f}] {units} (bootstrap on the median)",
         f"Profiles analyzed = {d['profiles_analyzed']}",
         f"Edge points found = {d['edge_points_found']}",
         f"S/N ratio (mean) = {d['snr_mean']:.1f}",

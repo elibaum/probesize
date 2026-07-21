@@ -19,8 +19,10 @@ command-line tool, or a Python library.
 - **Two detectors** — `edge` for step/knife edges and general structures;
   `particles` for gold-on-carbon style test samples, with shape filtering so
   substrate cracks and folds don't contaminate the measurement.
-- **Robust statistics** — median ± MAD and mean ± std over all accepted
-  profiles, plus signal-to-noise and edge-asymmetry summaries.
+- **Robust statistics with a real uncertainty** — median ± MAD and mean ± std
+  over all accepted profiles, plus a 95% bootstrap confidence interval on the
+  median (the uncertainty of the *estimate*, not just the spread of
+  measurements) and signal-to-noise / edge-asymmetry summaries.
 - **Interactive tuning that's instant** — the image is analyzed once; the
   sensitivity slider, region-of-interest rectangle, and threshold changes are
   pure re-filters of the stored fits (milliseconds, not re-analysis).
@@ -29,7 +31,9 @@ command-line tool, or a Python library.
 - **Anisotropy at a glance** — the polar plot shows resolution vs. edge
   orientation; astigmatism or coma appears as a non-circular distribution.
 - **Batch + reports** — analyze whole folders; every run can write JSON and
-  text reports plus annotated-image, histogram, and polar plots.
+  text reports plus annotated-image, histogram, and polar plots, and a batch
+  writes a `summary.csv` (one row per image) for tracking resolution across a
+  sample set or over time in any spreadsheet.
 - **Never blocked by missing calibration** — uncalibrated images are measured
   in pixels (clearly labeled), and you can type in a pixel size at any time to
   convert instantly.
@@ -139,7 +143,10 @@ Adding another vendor is one small parser function in
 
 Each run writes `<name>_result.json`, `<name>_result.txt`, and (unless
 `--no-plots`) `<name>_annotated.jpg`, `<name>_histogram.png`,
-`<name>_polar.png` — by default next to the input, or into `--out DIR`.
+`<name>_polar.png` — by default next to the input, or into `--out DIR`. A
+`--batch` run additionally writes `summary.csv`, one row per image (median,
+95% CI, MAD, mean/std, profile count, S/N, vendor, calibration, region). The
+GUI writes the same via **File → Export Batch Summary (CSV)...**.
 
 Common options:
 
@@ -188,6 +195,10 @@ Edge mode is tuned with `--min-spacing-px`, `--canny-sigma`,
 - **Prefer the median ± MAD.** A few bad profiles (touching particles,
   contamination) produce a long tail that skews the mean far more than the
   median.
+- **MAD vs. the 95% CI are different quantities.** The MAD is how much
+  individual edge measurements *scatter*; the 95% confidence interval is how
+  well the *median itself* is pinned down (it shrinks as more profiles
+  contribute). Report the CI as your uncertainty, not the MAD.
 - **Always report the criterion.** A "25–75% edge width" and a "20–80% edge
   width" of the same image differ by a fixed factor — quote which one you
   used (`--criterion`).

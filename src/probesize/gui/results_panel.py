@@ -13,6 +13,7 @@ class ResultsPanel(QGroupBox):
         layout = QFormLayout(self)
         self._labels = {
             "resolution_median": QLabel("--"),
+            "resolution_ci": QLabel("--"),
             "resolution_mean": QLabel("--"),
             "profiles_analyzed": QLabel("--"),
             "edge_points_found": QLabel("--"),
@@ -21,7 +22,11 @@ class ResultsPanel(QGroupBox):
             "pixel_size": QLabel("--"),
             "instrument": QLabel("--"),
         }
-        layout.addRow("Resolution (median +/- MAD):", self._labels["resolution_median"])
+        # the median is the headline; make it visually so
+        median_label = self._labels["resolution_median"]
+        median_label.setStyleSheet("font-weight: bold;")
+        layout.addRow("Resolution (median +/- MAD):", median_label)
+        layout.addRow("95% confidence interval:", self._labels["resolution_ci"])
         layout.addRow("Resolution (mean +/- std):", self._labels["resolution_mean"])
         layout.addRow("Profiles analyzed:", self._labels["profiles_analyzed"])
         layout.addRow("Edge points found:", self._labels["edge_points_found"])
@@ -37,6 +42,9 @@ class ResultsPanel(QGroupBox):
     def update_from_result(self, result: AnalysisResult) -> None:
         units = result.units
         self._labels["resolution_median"].setText(f"{result.resolution_median_nm:.2f} +/- {result.resolution_mad_nm:.2f} {units}")
+        self._labels["resolution_ci"].setText(
+            f"[{result.resolution_ci_low_nm:.2f}, {result.resolution_ci_high_nm:.2f}] {units}"
+        )
         self._labels["resolution_mean"].setText(f"{result.resolution_mean_nm:.2f} +/- {result.resolution_std_nm:.2f} {units}")
         self._labels["profiles_analyzed"].setText(str(result.n_profiles_analyzed))
         self._labels["edge_points_found"].setText(str(result.n_edge_points_found))

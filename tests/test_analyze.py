@@ -68,6 +68,45 @@ def test_uncalibrated_image_falls_back_to_pixel_units(tmp_path):
     assert fallback.resolution_mean_nm == pytest.approx(explicit.resolution_mean_nm)
 
 
+def test_bootstrap_ci_properties():
+    from probesize.analyze import bootstrap_median_ci
+
+    assert all(np.isnan(v) for v in bootstrap_median_ci(np.array([])))  # empty -> (nan, nan)
+    assert bootstrap_median_ci(np.array([3.0])) == (3.0, 3.0)  # single -> zero width
+
+    values = np.arange(1.0, 101.0)  # median 50.5
+    lo, hi = bootstrap_median_ci(values)
+    assert lo <= np.median(values) <= hi
+    assert values.min() <= lo < hi <= values.max()
+    # deterministic (fixed seed) so reports are reproducible
+    assert bootstrap_median_ci(values) == bootstrap_median_ci(values)
+
+
+def test_ci_on_result_brackets_median_and_is_tighter_than_mad(tmp_path):
+    image_path = tmp_path / "edge.png"
+    _make_synthetic_edge_image(image_path)
+    result = analyze_image(image_path, AnalysisParams(canny_sigma=2.0))
+
+    assert result.n_profiles_analyzed > 20
+    assert result.resolution_ci_low_nm <= result.resolution_median_nm <= result.resolution_ci_high_nm
+    # the CI (uncertainty of the estimate) is narrower than the MAD (spread
+    # of individual measurements) once many profiles contribute
+    assert (result.resolution_ci_high_nm - result.resolution_ci_low_nm) < 2 * result.resolution_mad_nm
+
+
+def test_manual_calibration_rescales_ci(tmp_path):
+    from probesize.analyze import calibrate_result
+
+    image_path = tmp_path / "edge.png"
+    _make_synthetic_edge_image(image_path)
+    px = analyze_image(image_path, AnalysisParams(canny_sigma=2.0))
+
+    nm = calibrate_result(px, 0.5)
+
+    assert nm.resolution_ci_low_nm == pytest.approx(0.5 * px.resolution_ci_low_nm)
+    assert nm.resolution_ci_high_nm == pytest.approx(0.5 * px.resolution_ci_high_nm)
+
+
 def test_refilter_preserves_pixel_units(tmp_path):
     from probesize.analyze import refilter_result
 

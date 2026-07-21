@@ -288,6 +288,52 @@ def test_mode_change_reanalyzes_whole_batch(qapp, sample_result, monkeypatch):
     assert sorted(started[0]) == ["a.tif", "b.tif", "c.tif"]  # all three re-analyzed
 
 
+def test_results_panel_shows_confidence_interval(qapp, sample_result):
+    win = MainWindow()
+    win.params.detection_mode = "particles"
+    win._on_analysis_finished(sample_result)
+
+    ci_text = win.results_panel._labels["resolution_ci"].text()
+    r = win.current_result
+    assert f"{r.resolution_ci_low_nm:.2f}" in ci_text
+    assert f"{r.resolution_ci_high_nm:.2f}" in ci_text
+
+
+def test_export_batch_csv_writes_current_view(qapp, sample_result, tmp_path, monkeypatch):
+    import csv as _csv
+
+    win = MainWindow()
+    win.params.detection_mode = "particles"
+    win._on_batch_file_done("a.tif", _result_with_path(sample_result, "a.tif"))
+    win._on_batch_file_done("b.tif", _result_with_path(sample_result, "b.tif"))
+
+    out = tmp_path / "summary.csv"
+    monkeypatch.setattr(
+        "probesize.gui.main_window.QFileDialog.getSaveFileName",
+        lambda *a, **k: (str(out), "CSV files (*.csv)"),
+    )
+    win.export_batch_csv()
+
+    assert out.exists()
+    with open(out, newline="") as f:
+        rows = list(_csv.DictReader(f))
+    assert sorted(r["image"] for r in rows) == ["a.tif", "b.tif"]
+    assert all(r["resolution_nm_ci95_low"] for r in rows)
+
+
+def test_export_batch_csv_without_batch_is_guarded(qapp, monkeypatch):
+    win = MainWindow()
+    called = []
+    monkeypatch.setattr(
+        "probesize.gui.main_window.QFileDialog.getSaveFileName",
+        lambda *a, **k: called.append(True) or ("", ""),
+    )
+    monkeypatch.setattr("probesize.gui.main_window.QMessageBox.information", lambda *a, **k: None)
+    win.export_batch_csv()
+
+    assert called == []  # short-circuits before the save dialog
+
+
 def test_criterion_dropdown_defaults_to_25_75(qapp):
     win = MainWindow()
 
