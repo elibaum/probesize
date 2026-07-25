@@ -57,6 +57,14 @@ class EdgeFitResult:
     r_squared: float = np.nan
     snr: float = np.nan
     asymmetry: float = np.nan
+    # The fitted width expressed in PIXELS. An edge-spread function can only
+    # be measured if the transition is sampled by several pixels; below about
+    # a pixel the fit is describing the sampling grid and the interpolation
+    # used to extract the profile rather than any real blur. Kept separate
+    # from `sigma` (which is in reporting units and is rescaled by
+    # calibration -- pixels are not), and set by the pipeline, which is where
+    # the pixel size is known.
+    sigma_px: float = np.nan
     failure_reason: Optional[str] = None
 
 

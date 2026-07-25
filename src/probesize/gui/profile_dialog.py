@@ -60,6 +60,15 @@ class ProfileDialog(QDialog):
                 f"sigma = {fit.sigma:.3f} {units}, R-squared = {fit.r_squared:.3f}",
                 f"S/N = {fit.snr:.1f}, asymmetry = {fit.asymmetry:.3f}",
             ]
+            limit = result.sampling_limit_px
+            if np.isfinite(fit.sigma_px) and fit.sigma_px < limit:
+                lines.append(
+                    f"⚠ SAMPLING-LIMITED: edge width {fit.sigma_px:.2f} px < {limit:g} px. "
+                    "This transition is contained within about a pixel, so the fit describes "
+                    "the sampling grid and profile interpolation rather than the instrument. "
+                    "Note R-squared and S/N look excellent here precisely because an erf fits "
+                    "an interpolation ramp almost perfectly."
+                )
         else:
             lines.append(f"Fit failed: {fit.failure_reason}")
         info = QLabel("\n".join(lines))

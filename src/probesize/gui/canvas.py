@@ -34,6 +34,7 @@ class ImageCanvas(MplCanvas):
         super().__init__(figsize=(6, 6))
         self._scatter = None
         self._rejected_scatter = None
+        self._sampling_limited_scatter = None
         self._colorbar = None
         self._highlight_artists = []
         self._rows = np.array([])
@@ -58,6 +59,7 @@ class ImageCanvas(MplCanvas):
         self._region_patch = None
         self._scatter = None
         self._rejected_scatter = None
+        self._sampling_limited_scatter = None
         self._highlight_artists = []
         self._rows = np.array([])
         self._cols = np.array([])
@@ -71,19 +73,46 @@ class ImageCanvas(MplCanvas):
             self.start_region_edit(callback, initial=editing_region)
         self.draw_idle()
 
-    def set_points(self, rows, cols, values, profile_indices=None, units: str = "nm") -> None:
+    def set_points(self, rows, cols, values, profile_indices=None, units: str = "nm", sampling_limited=None) -> None:
         """Show accepted points colored by resolution. ``profile_indices``
         maps each point back to its index in ``result.profiles`` for click
-        handling; defaults to 0..n-1."""
+        handling; defaults to 0..n-1.
+
+        Points flagged by ``sampling_limited`` (a boolean mask) are drawn in a
+        flat high-visibility colour instead of on the resolution colormap:
+        their resolution value is precisely the untrustworthy quantity, so
+        plotting it on the resolution scale would itself mislead.
+        """
         rows, cols = np.asarray(rows, dtype=float), np.asarray(cols, dtype=float)
+        values = np.asarray(values, dtype=float)
         if profile_indices is None:
             profile_indices = np.arange(len(rows))
-        self._rows, self._cols = rows, cols
-        self._profile_indices = np.asarray(profile_indices, dtype=int)
+        profile_indices = np.asarray(profile_indices, dtype=int)
+        if sampling_limited is None:
+            limited = np.zeros(len(rows), dtype=bool)
+        else:
+            limited = np.asarray(sampling_limited, dtype=bool)
+
+        # keep click lookup over every drawn point, trusted ones first
+        order = np.concatenate([np.flatnonzero(~limited), np.flatnonzero(limited)]) if len(rows) else np.array([], dtype=int)
+        self._rows, self._cols = rows[order], cols[order]
+        self._profile_indices = profile_indices[order]
+
         self._remove_colorbar()
-        if len(rows):
-            self._scatter = self.axes.scatter(cols, rows, c=values, cmap="jet", s=10, linewidths=0, picker=5)
-            self._colorbar = self.figure.colorbar(self._scatter, ax=self.axes, label=f"resolution ({units})", fraction=0.046, pad=0.04)
+        ok, bad = ~limited, limited
+        if np.any(ok):
+            self._scatter = self.axes.scatter(
+                cols[ok], rows[ok], c=values[ok], cmap="jet", s=10, linewidths=0, picker=5
+            )
+            self._colorbar = self.figure.colorbar(
+                self._scatter, ax=self.axes, label=f"resolution ({units})", fraction=0.046, pad=0.04
+            )
+        if np.any(bad):
+            self._sampling_limited_scatter = self.axes.scatter(
+                cols[bad], rows[bad], c="magenta", s=10, linewidths=0, picker=5,
+                label="sampling-limited",
+            )
+            self.axes.legend(loc="upper right", fontsize=7, framealpha=0.8)
         self.draw_idle()
 
     def set_rejected_points(self, rows, cols, profile_indices) -> None:

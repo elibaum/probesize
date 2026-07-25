@@ -31,6 +31,9 @@ def summary_dict(result: AnalysisResult) -> dict:
         "resolution_nm_mad": result.resolution_mad_nm,
         "resolution_nm_ci95_low": result.resolution_ci_low_nm,
         "resolution_nm_ci95_high": result.resolution_ci_high_nm,
+        "sampling_limited_profiles": result.n_sampling_limited,
+        "median_sampling_limited": result.median_sampling_limited,
+        "sampling_limit_px": result.sampling_limit_px,
         "profiles_analyzed": result.n_profiles_analyzed,
         "edge_points_found": result.n_edge_points_found,
         "snr_mean": result.snr_mean,
@@ -59,6 +62,8 @@ _CSV_COLUMNS = [
     "resolution_nm_mad",
     "resolution_nm_ci95_low",
     "resolution_nm_ci95_high",
+    "median_sampling_limited",
+    "sampling_limited_profiles",
     "resolution_nm_mean",
     "resolution_nm_std",
     "profiles_analyzed",
@@ -111,6 +116,18 @@ def write_text_report(result: AnalysisResult, out_path: Path | str) -> None:
         f"S/N ratio (mean) = {d['snr_mean']:.1f}",
         f"Asymmetry (mean) = {d['asymmetry_mean']:.3f}",
     ]
+    if result.n_sampling_limited:
+        share = result.n_sampling_limited / max(result.n_profiles_analyzed, 1)
+        lines.append(
+            f"Sampling-limited profiles = {result.n_sampling_limited} ({share:.0%}, "
+            f"edge width < {result.sampling_limit_px:g} px)"
+        )
+    if result.median_sampling_limited:
+        lines.append(
+            "WARNING: the reported resolution is at or below the pixel sampling limit. "
+            "The measurement reflects the pixel grid rather than the instrument -- "
+            "increase magnification (or use a finer pixel size) for a valid figure."
+        )
     Path(out_path).write_text("\n".join(lines) + "\n")
 
 

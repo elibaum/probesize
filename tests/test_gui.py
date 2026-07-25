@@ -288,6 +288,55 @@ def test_mode_change_reanalyzes_whole_batch(qapp, sample_result, monkeypatch):
     assert sorted(started[0]) == ["a.tif", "b.tif", "c.tif"]  # all three re-analyzed
 
 
+def test_canvas_splits_sampling_limited_points_into_own_scatter(qapp):
+    from probesize.gui.canvas import ImageCanvas
+
+    canvas = ImageCanvas()
+    canvas.set_image(np.zeros((50, 50)))
+    canvas.set_points(
+        rows=[10, 20, 30, 40],
+        cols=[10, 20, 30, 40],
+        values=[1.0, 2.0, 3.0, 4.0],
+        profile_indices=[7, 8, 9, 10],
+        sampling_limited=[False, True, False, True],
+    )
+
+    # two scatters: the resolution colormap and the flat magenta overlay
+    assert canvas._scatter is not None
+    assert canvas._sampling_limited_scatter is not None
+    # every point stays click-resolvable to its own profile index
+    assert sorted(canvas._profile_indices.tolist()) == [7, 8, 9, 10]
+    assert canvas._rows.size == 4
+
+
+def test_canvas_draws_no_magenta_scatter_when_all_clear(qapp):
+    from probesize.gui.canvas import ImageCanvas
+
+    canvas = ImageCanvas()
+    canvas.set_image(np.zeros((50, 50)))
+    canvas.set_points([10, 20], [10, 20], [1.0, 2.0], sampling_limited=[False, False])
+
+    assert canvas._scatter is not None
+    assert canvas._sampling_limited_scatter is None
+
+
+def test_sampling_limited_click_maps_to_right_profile(qapp):
+    import types
+
+    from probesize.gui.canvas import ImageCanvas
+
+    canvas = ImageCanvas()
+    canvas.set_image(np.zeros((50, 50)))
+    canvas.set_points([10, 40], [10, 40], [1.0, 2.0], profile_indices=[3, 99],
+                      sampling_limited=[False, True])
+
+    emitted = []
+    canvas.point_clicked.connect(emitted.append)
+    canvas._on_click(types.SimpleNamespace(inaxes=canvas.axes, xdata=40, ydata=40))
+
+    assert emitted == [99]  # the flagged point, not the trusted one
+
+
 def test_results_panel_shows_confidence_interval(qapp, sample_result):
     win = MainWindow()
     win.params.detection_mode = "particles"

@@ -21,7 +21,9 @@ class ResultsPanel(QGroupBox):
             "asymmetry_mean": QLabel("--"),
             "pixel_size": QLabel("--"),
             "instrument": QLabel("--"),
+            "sampling": QLabel("--"),
         }
+        self._labels["sampling"].setWordWrap(True)
         # the median is the headline; make it visually so
         median_label = self._labels["resolution_median"]
         median_label.setStyleSheet("font-weight: bold;")
@@ -34,6 +36,7 @@ class ResultsPanel(QGroupBox):
         layout.addRow("Asymmetry (mean):", self._labels["asymmetry_mean"])
         layout.addRow("Pixel size:", self._labels["pixel_size"])
         layout.addRow("Instrument:", self._labels["instrument"])
+        layout.addRow("Sampling:", self._labels["sampling"])
 
     def clear(self) -> None:
         for label in self._labels.values():
@@ -50,6 +53,25 @@ class ResultsPanel(QGroupBox):
         self._labels["edge_points_found"].setText(str(result.n_edge_points_found))
         self._labels["snr_mean"].setText(f"{result.snr_mean:.1f}")
         self._labels["asymmetry_mean"].setText(f"{result.asymmetry_mean:.3f}")
+        share = result.n_sampling_limited / max(result.n_profiles_analyzed, 1)
+        sampling = self._labels["sampling"]
+        if result.median_sampling_limited:
+            sampling.setText(
+                f"⚠ below the {result.sampling_limit_px:g} px sampling limit "
+                f"({result.n_sampling_limited} of {result.n_profiles_analyzed} profiles) — "
+                "this figure reflects the pixel grid, not the instrument; increase magnification"
+            )
+            sampling.setStyleSheet("color: #b00020; font-weight: bold;")
+        elif result.n_sampling_limited:
+            sampling.setText(
+                f"{result.n_sampling_limited} of {result.n_profiles_analyzed} profiles "
+                f"({share:.0%}) below the {result.sampling_limit_px:g} px sampling limit"
+            )
+            sampling.setStyleSheet("color: gray;")
+        else:
+            sampling.setText("all profiles above the sampling limit")
+            sampling.setStyleSheet("color: gray;")
+
         if units == "px":
             self._labels["pixel_size"].setText("uncalibrated — measuring in pixels")
             self._labels["instrument"].setText(

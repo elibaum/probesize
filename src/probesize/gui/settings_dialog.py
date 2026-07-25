@@ -58,8 +58,10 @@ class SettingsDialog(QDialog):
 
         self.r_squared_min = _spinbox(0.0, 1.0, params.r_squared_min, decimals=2, step=0.05)
         self.snr_min = _spinbox(0.0, 100.0, params.snr_min, decimals=1, step=0.5)
+        self.sampling_limit_px = _spinbox(0.0, 20.0, params.sampling_limit_px, decimals=2, step=0.25)
         form.addRow("Min R-squared:", self.r_squared_min)
         form.addRow("Min S/N ratio:", self.snr_min)
+        form.addRow("Sampling-limit warning (px):", self.sampling_limit_px)
         layout.addWidget(general)
 
         self.edge_group = QGroupBox("Edge mode")
@@ -112,6 +114,7 @@ class SettingsDialog(QDialog):
         p.pixel_size_nm = self.pixel_size_override.value() if self.pixel_size_enabled.isChecked() else None
         p.r_squared_min = self.r_squared_min.value()
         p.snr_min = self.snr_min.value()
+        p.sampling_limit_px = self.sampling_limit_px.value()
         p.min_spacing_px = self.min_spacing_px.value()
         p.canny_sigma = self.canny_sigma.value()
         p.min_gradient_snr = self.min_gradient_snr.value()

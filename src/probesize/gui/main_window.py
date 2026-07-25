@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -466,6 +467,11 @@ class MainWindow(QMainWindow):
             "" if raw.units == "nm"
             else " No calibration found: measurements are in PIXELS (set a pixel size in Settings for nm)."
         )
+        if self.current_result is not None and self.current_result.median_sampling_limited:
+            note += (
+                "  WARNING: resolution is at or below the pixel sampling limit — "
+                "increase magnification for a valid measurement."
+            )
         self.statusBar().showMessage(
             f"{Path(raw.image_path).name}: done. Sensitivity changes now apply instantly.{note}"
         )
@@ -496,12 +502,16 @@ class MainWindow(QMainWindow):
         self.image_canvas.set_image(result.image_gray, title=title)
 
         accepted = [(i, p) for i, p in enumerate(result.profiles) if p.accepted]
+        limit = result.sampling_limit_px
         self.image_canvas.set_points(
             [p.point.row for _, p in accepted],
             [p.point.col for _, p in accepted],
             [p.resolution_nm for _, p in accepted],
             profile_indices=[i for i, _ in accepted],
             units=result.units,
+            sampling_limited=[
+                bool(np.isfinite(p.fit.sigma_px) and p.fit.sigma_px < limit) for _, p in accepted
+            ],
         )
         if self.show_rejected_checkbox.isChecked():
             rejected = [(i, p) for i, p in enumerate(result.profiles) if not p.accepted]

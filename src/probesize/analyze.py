@@ -54,6 +54,14 @@ class AnalysisParams:
     # image. Applied as a post-hoc acceptance check, so changing the region
     # only needs refilter_result, not a re-analysis.
     region: Optional[tuple[float, float, float, float]] = None
+    # Diagnostic (NOT acceptance) threshold: fitted edge widths below this
+    # many pixels are flagged as sampling-limited. An edge-spread function
+    # must span several pixels to be measurable -- below ~1 px the fit
+    # measures the pixel grid and the profile interpolation, not the
+    # specimen, and the R-squared/SN gates cannot detect it (an erf fits a
+    # smooth interpolation ramp almost perfectly). Such profiles are still
+    # reported; the remedy is more magnification / a finer pixel size.
+    sampling_limit_px: float = 1.0
 
 
 def tangential_params_for(point: EdgePoint, params: AnalysisParams) -> tuple[float, int]:
@@ -144,6 +152,16 @@ class AnalysisResult:
     # the spread of individual profile measurements)
     resolution_ci_low_nm: float = float("nan")
     resolution_ci_high_nm: float = float("nan")
+    # Accepted profiles whose fitted width is below the pixel sampling limit
+    # (see AnalysisParams.sampling_limit_px). These are still included in the
+    # statistics; the flags exist so the condition can be surfaced.
+    # `median_sampling_limited` is the actionable one: it says the reported
+    # median itself sits below what the pixel grid can resolve.
+    n_sampling_limited: int = 0
+    median_sampling_limited: bool = False
+    # the threshold these flags were evaluated against, so the result is
+    # self-describing in reports and survives calibrate_result
+    sampling_limit_px: float = 1.0
     units: str = "nm"
     calibration: str = "metadata"
     # region of interest the acceptance was evaluated under, as
@@ -246,6 +264,11 @@ def analyze_image(path: Path | str, params: Optional[AnalysisParams] = None) -> 
         )
 
         fit = fit_edge_profile(distances_nm, intensity)
+        if fit.success:
+            # record the width in pixels; this survives refilter_result (which
+            # reuses the fit) and calibrate_result (which rescales only sigma
+            # and x0 -- sigma/pixel_size is invariant under calibration)
+            fit = replace(fit, sigma_px=fit.sigma / pixel_size_nm)
         resolution_nm = (
             resolution_from_sigma(fit.sigma, params.criterion_lo, params.criterion_hi)
             if fit.success
@@ -255,7 +278,8 @@ def analyze_image(path: Path | str, params: Optional[AnalysisParams] = None) -> 
         profile_results.append(ProfileResult(point, fit, resolution_nm, accepted, reject_reason))
 
     return _assemble_result(
-        path, pixel_size_nm, units, calibration, params.region, len(edge_points), profile_results, image, meta
+        path, pixel_size_nm, units, calibration, params.region, params.sampling_limit_px,
+        len(edge_points), profile_results, image, meta,
     )
 
 
@@ -294,6 +318,7 @@ def refilter_result(result: AnalysisResult, params: AnalysisParams) -> AnalysisR
         result.units,
         result.calibration,
         params.region,
+        params.sampling_limit_px,
         result.n_edge_points_found,
         profile_results,
         result.image_gray,
@@ -335,6 +360,7 @@ def calibrate_result(result: AnalysisResult, pixel_size_nm: float) -> AnalysisRe
         "nm",
         "fallback",
         result.region,
+        result.sampling_limit_px,
         result.n_edge_points_found,
         profile_results,
         result.image_gray,
@@ -377,6 +403,7 @@ def _assemble_result(
     units: str,
     calibration: str,
     region: Optional[tuple[float, float, float, float]],
+    sampling_limit_px: float,
     n_edge_points: int,
     profile_results: list[ProfileResult],
     image: Optional[np.ndarray],
@@ -394,6 +421,12 @@ def _assemble_result(
         median_nm = mad_nm = float("nan")
     ci_low_nm, ci_high_nm = bootstrap_median_ci(resolutions)
 
+    # sampling-limit diagnostics (reporting only -- nothing is excluded)
+    sigma_px = np.array([p.fit.sigma_px for p in accepted], dtype=float)
+    finite = sigma_px[np.isfinite(sigma_px)]
+    n_sampling_limited = int(np.count_nonzero(finite < sampling_limit_px))
+    median_sampling_limited = bool(finite.size and np.median(finite) < sampling_limit_px)
+
     return AnalysisResult(
         image_path=path,
         pixel_size_nm=pixel_size_nm,
@@ -403,6 +436,9 @@ def _assemble_result(
         resolution_mad_nm=mad_nm,
         resolution_ci_low_nm=ci_low_nm,
         resolution_ci_high_nm=ci_high_nm,
+        n_sampling_limited=n_sampling_limited,
+        median_sampling_limited=median_sampling_limited,
+        sampling_limit_px=sampling_limit_px,
         n_profiles_analyzed=len(accepted),
         n_edge_points_found=n_edge_points,
         snr_mean=float(np.nanmean(snrs)) if snrs.size else float("nan"),

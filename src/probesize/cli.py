@@ -53,6 +53,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-solidity", type=float, default=0.85, help="[particles mode] reject blobs less convex than this (area / convex-hull area)")
     p.add_argument("--min-circularity", type=float, default=0.7, help="[particles mode] reject blobs less round than this (4*pi*area/perimeter^2)")
     p.add_argument("--contour-spacing-px", type=float, default=4.0, help="[particles mode] spacing between sampled points around each particle's perimeter")
+    p.add_argument(
+        "--sampling-limit-px",
+        type=float,
+        default=1.0,
+        help="warn when fitted edge widths fall below this many pixels (diagnostic only; nothing is excluded)",
+    )
     p.add_argument("--r-squared-min", type=float, default=0.85, help="minimum fit quality to accept a profile")
     p.add_argument("--snr-min", type=float, default=3.0, help="minimum signal-to-noise ratio to accept a profile")
     p.add_argument(
@@ -135,6 +141,23 @@ def _process_one(path: Path, out_dir: Path, params: AnalysisParams, make_plots: 
             f"S/N = {result.snr_mean:.1f}, asymmetry = {result.asymmetry_mean:.3f})"
             f"{uncalibrated_note}"
         )
+
+    # sampling-limit diagnostics go to stderr so `-s` stdout stays scriptable
+    if result.median_sampling_limited:
+        print(
+            f"{path.name}: WARNING resolution is at or below the pixel sampling limit "
+            f"({result.n_sampling_limited}/{result.n_profiles_analyzed} profiles have an edge width "
+            f"< {result.sampling_limit_px:g} px). The fit reflects the pixel grid, not the "
+            f"instrument -- increase magnification for a valid measurement.",
+            file=sys.stderr,
+        )
+    elif result.n_profiles_analyzed and result.n_sampling_limited / result.n_profiles_analyzed >= 0.2:
+        share = result.n_sampling_limited / result.n_profiles_analyzed
+        print(
+            f"{path.name}: note {share:.0%} of profiles are below the pixel sampling limit "
+            f"({result.sampling_limit_px:g} px); the median is still above it.",
+            file=sys.stderr,
+        )
     return result
 
 
@@ -169,6 +192,7 @@ def main(argv: list[str] | None = None) -> int:
         allow_pixel_units=not args.require_calibration,
         fallback_pixel_size_nm=args.fallback_pixel_size_nm,
         region=region,
+        sampling_limit_px=args.sampling_limit_px,
     )
 
     status = 0

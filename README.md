@@ -122,6 +122,11 @@ Adding another vendor is one small parser function in
   favors coverage on noisy or imperfect images. Changes apply instantly.
 - **Show rejected points** — overlays every excluded candidate in grey; click
   one to see exactly which check it failed and its fit.
+- **Sampling-limit flagging** — measurements whose fitted edge width falls
+  below one pixel are drawn in **magenta** instead of on the resolution
+  colour scale, and the results panel warns when the reported median itself
+  is below the limit. They are still included in the statistics; the colour
+  tells you *where* the image is undersampled.
 - **Manual calibration** — appears when the image carries no pixel size;
   enter one and every number converts from px to nm on the spot.
 - **Tools → Histogram** — resolution distribution with adjustable binning,
@@ -159,6 +164,7 @@ Common options:
 | `--require-calibration` | fail on uncalibrated images instead of using px units |
 | `--region X0,Y0,X1,Y1` | restrict measurements to a rectangle (pixels) |
 | `--r-squared-min`, `--snr-min` | fit-acceptance thresholds |
+| `--sampling-limit-px` | warn below this fitted edge width (default 1 px; diagnostic only) |
 | `-s` | print a single resolution line (for scripting) |
 
 Edge mode is tuned with `--min-spacing-px`, `--canny-sigma`,
@@ -205,6 +211,14 @@ Edge mode is tuned with `--min-spacing-px`, `--canny-sigma`,
 - **Real images are noisy.** Don't expect the near-perfect R² of synthetic
   data; the sensitivity slider (or `--r-squared-min`/`--snr-min`) trades
   strictness against how many profiles survive.
+- **Heed the sampling-limit warning.** An edge-spread function can only be
+  measured if the transition spans several pixels. Below about one pixel the
+  fit is describing the pixel grid and the interpolation used to sample
+  profiles, not your instrument — probesize flags this (magenta points, a red
+  panel warning, a note in reports) because **R² and S/N cannot detect it**:
+  an erf fits a smooth interpolation ramp almost perfectly, so a meaningless
+  result looks like an excellent one. The cure is more magnification or a
+  finer pixel size, not a looser threshold. Tune with `--sampling-limit-px`.
 - **Check the polar plot** before trusting a single number — a strongly
   elliptical distribution means the resolution is direction-dependent
   (astigmatism/coma) and one scalar undersells the situation.
