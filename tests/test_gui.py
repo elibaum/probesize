@@ -550,6 +550,26 @@ def test_profile_dialog_construct(qapp, sample_result):
     ProfileDialog(sample_result, AnalysisParams(detection_mode="particles"), accepted_idx)
 
 
+def test_profile_dialog_separates_real_pixels_from_interpolation(qapp, sample_result):
+    # regression: the plotted series used to be labelled just "data", which
+    # read as measured pixel values when it is actually a mean of bilinear
+    # interpolations at 4 samples/px -- misleading enough to cause a bug report
+    accepted_idx = next(i for i, p in enumerate(sample_result.profiles) if p.accepted)
+    dialog = ProfileDialog(sample_result, AnalysisParams(detection_mode="particles"), accepted_idx)
+
+    labels = [line.get_label() for line in dialog.canvas.axes.get_lines()]
+    assert "data" not in labels  # the ambiguous label is gone
+    assert "image pixels" in labels
+    assert any("interpolated" in label for label in labels)
+
+    # the real-pixel series is sampled once per pixel, so it must be sparser
+    # than the 4x-oversampled interpolated one
+    by_label = {line.get_label(): line for line in dialog.canvas.axes.get_lines()}
+    n_raw = len(by_label["image pixels"].get_xdata())
+    n_interp = len(next(v for k, v in by_label.items() if "interpolated" in k).get_xdata())
+    assert n_interp > n_raw * 3
+
+
 def test_settings_dialog_roundtrip(qapp):
     dialog = SettingsDialog(AnalysisParams())
     dialog.mode_combo.setCurrentText("particles")

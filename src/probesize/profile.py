@@ -13,12 +13,19 @@ def extract_profile(
     angle: float,
     length_px: float = 24.0,
     samples_per_px: float = 4.0,
+    order: int = 1,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Sample image intensity along a line through (row, col) in direction
     `angle` (radians, as returned by :func:`probesize.edges.detect_edge_points`).
 
     Returns ``(distance_px, intensity)`` where ``distance_px`` is centered at
     0 at the input point and spans ``[-length_px/2, length_px/2]``.
+
+    ``order`` is the spline order passed to ``map_coordinates``. The default
+    of 1 (bilinear) is what the measurement pipeline uses. Pass ``order=0``
+    for nearest-neighbour sampling, which returns the **actual pixel values**
+    the line passes over rather than interpolated ones -- used by the profile
+    inspector to show real data next to the interpolated curve.
     """
     n_samples = max(int(length_px * samples_per_px), 8)
     distances = np.linspace(-length_px / 2, length_px / 2, n_samples)
@@ -31,7 +38,7 @@ def extract_profile(
     intensity = map_coordinates(
         np.asarray(image, dtype=float),
         [sample_rows, sample_cols],
-        order=1,
+        order=order,
         mode="nearest",
     )
     return distances, intensity

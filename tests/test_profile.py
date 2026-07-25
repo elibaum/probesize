@@ -24,6 +24,22 @@ def test_single_line_profile_passes_through_the_edge_point():
     np.testing.assert_allclose(single, reference)
 
 
+def test_order_zero_returns_true_pixel_values_order_one_interpolates():
+    # a binary image: nearest-neighbour sampling can only ever return values
+    # that exist in the image, while bilinear interpolation manufactures
+    # intermediate levels between them. This is the distinction the profile
+    # inspector now shows explicitly.
+    image = np.zeros((40, 40))
+    image[:, 20:] = 255.0
+
+    _, raw = extract_profile(image, 20.0, 20.0, angle=0.0, length_px=20, samples_per_px=1.0, order=0)
+    _, interpolated = extract_profile(image, 20.0, 20.0, angle=0.0, length_px=20, samples_per_px=4.0)
+
+    assert set(np.unique(raw)) <= {0.0, 255.0}  # only real pixel values
+    intermediate = interpolated[(interpolated > 0.5) & (interpolated < 254.5)]
+    assert intermediate.size > 0  # interpolation invents in-between levels
+
+
 def test_zero_or_negative_n_lines_is_clamped_to_one():
     image = _gradient_image()
 
