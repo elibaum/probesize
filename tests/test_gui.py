@@ -68,7 +68,11 @@ def test_main_window_renders_result(qapp, sample_result):
     # of it at the window's current thresholds
     assert win._raw_result is sample_result
     assert win.current_result is not sample_result
-    assert win.image_canvas._rows.size == win.current_result.n_profiles_analyzed
+    # the canvas always draws accepted points plus the sampling-limited ones
+    # excluded from the statistics (the latter are shown, not hidden)
+    assert win.image_canvas._rows.size == (
+        win.current_result.n_profiles_analyzed + win.current_result.n_sampling_limited
+    )
 
 
 def test_opening_multiple_images_leaves_a_single_colorbar(qapp):
@@ -119,16 +123,24 @@ def test_rejected_points_shown_and_clickable_when_toggled(qapp, sample_result):
     win.params.detection_mode = "particles"
     win._on_analysis_finished(sample_result)
 
-    n_accepted_pts = win.image_canvas._rows.size
+    n_always_shown = win.image_canvas._rows.size
     win.show_rejected_checkbox.setChecked(True)
 
     result = win.current_result
-    n_rejected = sum(1 for p in result.profiles if not p.accepted)
-    assert n_rejected > 0  # lenient-floor raw guarantees some rejects at strict display thresholds
-    assert win.image_canvas._rows.size == n_accepted_pts + n_rejected
 
-    # clicking a rejected point emits its profiles-list index
-    rejected_index = next(i for i, p in enumerate(result.profiles) if not p.accepted)
+    def _sampling_limited(p):
+        return bool(p.reject_reason and p.reject_reason.startswith("sampling-limited"))
+
+    # the toggle adds only the quality-rejected points; sampling-limited ones
+    # are already on screen unconditionally
+    other_rejects = [
+        i for i, p in enumerate(result.profiles) if not p.accepted and not _sampling_limited(p)
+    ]
+    assert other_rejects  # lenient-floor raw guarantees some at strict display thresholds
+    assert win.image_canvas._rows.size == n_always_shown + len(other_rejects)
+
+    # clicking a quality-rejected point emits its profiles-list index
+    rejected_index = other_rejects[0]
     point = result.profiles[rejected_index].point
     emitted = []
     win.image_canvas.point_clicked.disconnect()
@@ -140,7 +152,7 @@ def test_rejected_points_shown_and_clickable_when_toggled(qapp, sample_result):
     assert not result.profiles[emitted[0]].accepted
 
     win.show_rejected_checkbox.setChecked(False)
-    assert win.image_canvas._rows.size == n_accepted_pts
+    assert win.image_canvas._rows.size == n_always_shown
 
 
 def test_tool_dialogs_construct(qapp, sample_result):
@@ -288,23 +300,18 @@ def test_mode_change_reanalyzes_whole_batch(qapp, sample_result, monkeypatch):
     assert sorted(started[0]) == ["a.tif", "b.tif", "c.tif"]  # all three re-analyzed
 
 
-def test_canvas_splits_sampling_limited_points_into_own_scatter(qapp):
+def test_canvas_draws_excluded_points_in_their_own_scatter(qapp):
     from probesize.gui.canvas import ImageCanvas
 
     canvas = ImageCanvas()
     canvas.set_image(np.zeros((50, 50)))
-    canvas.set_points(
-        rows=[10, 20, 30, 40],
-        cols=[10, 20, 30, 40],
-        values=[1.0, 2.0, 3.0, 4.0],
-        profile_indices=[7, 8, 9, 10],
-        sampling_limited=[False, True, False, True],
-    )
+    canvas.set_points([10, 30], [10, 30], [1.0, 3.0], profile_indices=[7, 9])
+    canvas.set_sampling_limited_points([20, 40], [20, 40], profile_indices=[8, 10])
 
     # two scatters: the resolution colormap and the flat magenta overlay
     assert canvas._scatter is not None
     assert canvas._sampling_limited_scatter is not None
-    # every point stays click-resolvable to its own profile index
+    # every drawn point stays click-resolvable to its own profile index
     assert sorted(canvas._profile_indices.tolist()) == [7, 8, 9, 10]
     assert canvas._rows.size == 4
 
@@ -314,7 +321,8 @@ def test_canvas_draws_no_magenta_scatter_when_all_clear(qapp):
 
     canvas = ImageCanvas()
     canvas.set_image(np.zeros((50, 50)))
-    canvas.set_points([10, 20], [10, 20], [1.0, 2.0], sampling_limited=[False, False])
+    canvas.set_points([10, 20], [10, 20], [1.0, 2.0])
+    canvas.set_sampling_limited_points([], [], profile_indices=[])
 
     assert canvas._scatter is not None
     assert canvas._sampling_limited_scatter is None
@@ -327,14 +335,36 @@ def test_sampling_limited_click_maps_to_right_profile(qapp):
 
     canvas = ImageCanvas()
     canvas.set_image(np.zeros((50, 50)))
-    canvas.set_points([10, 40], [10, 40], [1.0, 2.0], profile_indices=[3, 99],
-                      sampling_limited=[False, True])
+    canvas.set_points([10], [10], [1.0], profile_indices=[3])
+    canvas.set_sampling_limited_points([40], [40], profile_indices=[99])
 
     emitted = []
     canvas.point_clicked.connect(emitted.append)
     canvas._on_click(types.SimpleNamespace(inaxes=canvas.axes, xdata=40, ydata=40))
 
-    assert emitted == [99]  # the flagged point, not the trusted one
+    assert emitted == [99]  # the excluded point, not the accepted one
+
+
+def test_excluded_points_are_shown_without_the_rejected_toggle(qapp, tmp_path):
+    # they mark where a finer pixel size would have bought a measurement, so
+    # they must not be hidden behind the opt-in rejected-points overlay
+    from probesize.analyze import analyze_image as _analyze
+    from scipy.special import erf as _erf
+    from PIL import Image as _Image
+
+    cols = np.arange(200)
+    profile = 127.5 * (1 + _erf((cols - 60) / (np.sqrt(2) * 3.0)))
+    profile[140:] = 0.0
+    path = tmp_path / "mixed.png"
+    _Image.fromarray(np.tile(profile, (200, 1)).astype(np.uint8)).save(path)
+
+    win = MainWindow()
+    result = _analyze(path, AnalysisParams(canny_sigma=2.0))
+    assert result.n_sampling_limited > 0
+    win._on_analysis_finished(result)
+
+    assert not win.show_rejected_checkbox.isChecked()
+    assert win.image_canvas._sampling_limited_scatter is not None
 
 
 def test_results_panel_shows_confidence_interval(qapp, sample_result):

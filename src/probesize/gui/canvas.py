@@ -73,44 +73,42 @@ class ImageCanvas(MplCanvas):
             self.start_region_edit(callback, initial=editing_region)
         self.draw_idle()
 
-    def set_points(self, rows, cols, values, profile_indices=None, units: str = "nm", sampling_limited=None) -> None:
+    def set_points(self, rows, cols, values, profile_indices=None, units: str = "nm") -> None:
         """Show accepted points colored by resolution. ``profile_indices``
         maps each point back to its index in ``result.profiles`` for click
-        handling; defaults to 0..n-1.
-
-        Points flagged by ``sampling_limited`` (a boolean mask) are drawn in a
-        flat high-visibility colour instead of on the resolution colormap:
-        their resolution value is precisely the untrustworthy quantity, so
-        plotting it on the resolution scale would itself mislead.
-        """
+        handling; defaults to 0..n-1."""
         rows, cols = np.asarray(rows, dtype=float), np.asarray(cols, dtype=float)
-        values = np.asarray(values, dtype=float)
         if profile_indices is None:
             profile_indices = np.arange(len(rows))
-        profile_indices = np.asarray(profile_indices, dtype=int)
-        if sampling_limited is None:
-            limited = np.zeros(len(rows), dtype=bool)
-        else:
-            limited = np.asarray(sampling_limited, dtype=bool)
-
-        # keep click lookup over every drawn point, trusted ones first
-        order = np.concatenate([np.flatnonzero(~limited), np.flatnonzero(limited)]) if len(rows) else np.array([], dtype=int)
-        self._rows, self._cols = rows[order], cols[order]
-        self._profile_indices = profile_indices[order]
-
+        self._rows, self._cols = rows, cols
+        self._profile_indices = np.asarray(profile_indices, dtype=int)
         self._remove_colorbar()
-        ok, bad = ~limited, limited
-        if np.any(ok):
-            self._scatter = self.axes.scatter(
-                cols[ok], rows[ok], c=values[ok], cmap="jet", s=10, linewidths=0, picker=5
-            )
+        if len(rows):
+            self._scatter = self.axes.scatter(cols, rows, c=values, cmap="jet", s=10, linewidths=0, picker=5)
             self._colorbar = self.figure.colorbar(
                 self._scatter, ax=self.axes, label=f"resolution ({units})", fraction=0.046, pad=0.04
             )
-        if np.any(bad):
+        self.draw_idle()
+
+    def set_sampling_limited_points(self, rows, cols, profile_indices) -> None:
+        """Show profiles excluded for being finer than the pixel grid can
+        resolve, in a flat high-visibility colour.
+
+        Drawn unconditionally (unlike the rejected-points overlay, which is
+        opt-in) because these are measurements the image *could* have given
+        at a finer pixel size -- if they simply vanished, an undersampled
+        image would look sparsely detected for no visible reason.
+        """
+        rows, cols = np.asarray(rows, dtype=float), np.asarray(cols, dtype=float)
+        if len(rows):
             self._sampling_limited_scatter = self.axes.scatter(
-                cols[bad], rows[bad], c="magenta", s=10, linewidths=0, picker=5,
-                label="sampling-limited",
+                cols, rows, c="magenta", s=8, linewidths=0, alpha=0.85, picker=5,
+                label="excluded: sampling-limited",
+            )
+            self._rows = np.concatenate([self._rows, rows])
+            self._cols = np.concatenate([self._cols, cols])
+            self._profile_indices = np.concatenate(
+                [self._profile_indices, np.asarray(profile_indices, dtype=int)]
             )
             self.axes.legend(loc="upper right", fontsize=7, framealpha=0.8)
         self.draw_idle()

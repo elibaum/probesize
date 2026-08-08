@@ -143,19 +143,21 @@ def _process_one(path: Path, out_dir: Path, params: AnalysisParams, make_plots: 
         )
 
     # sampling-limit diagnostics go to stderr so `-s` stdout stays scriptable
-    if result.median_sampling_limited:
+    fitted = result.n_profiles_analyzed + result.n_sampling_limited
+    if result.sampling_limited_dominant:
         print(
-            f"{path.name}: WARNING resolution is at or below the pixel sampling limit "
-            f"({result.n_sampling_limited}/{result.n_profiles_analyzed} profiles have an edge width "
-            f"< {result.sampling_limit_px:g} px). The fit reflects the pixel grid, not the "
-            f"instrument -- increase magnification for a valid measurement.",
+            f"{path.name}: WARNING {result.n_sampling_limited} of {fitted} profiles "
+            f"({result.n_sampling_limited / fitted:.0%}) were finer than the pixel grid can "
+            f"resolve (< {result.sampling_limit_px:g} px) and were excluded. The figure above "
+            f"comes from the resolvable minority and overstates the edge width -- increase "
+            f"magnification for a valid measurement.",
             file=sys.stderr,
         )
-    elif result.n_profiles_analyzed and result.n_sampling_limited / result.n_profiles_analyzed >= 0.2:
-        share = result.n_sampling_limited / result.n_profiles_analyzed
+    elif result.n_sampling_limited:
         print(
-            f"{path.name}: note {share:.0%} of profiles are below the pixel sampling limit "
-            f"({result.sampling_limit_px:g} px); the median is still above it.",
+            f"{path.name}: note {result.n_sampling_limited} of {fitted} profiles "
+            f"({result.n_sampling_limited / fitted:.0%}) excluded as sampling-limited "
+            f"(< {result.sampling_limit_px:g} px).",
             file=sys.stderr,
         )
     return result

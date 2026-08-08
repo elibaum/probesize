@@ -118,6 +118,14 @@ def evaluate_acceptance(point: EdgePoint, fit: EdgeFitResult, params: AnalysisPa
         return False, f"r_squared={fit.r_squared:.2f}<{params.r_squared_min:g}"
     if fit.snr < params.snr_min:
         return False, f"snr={fit.snr:.1f}<{params.snr_min:g}"
+    if np.isfinite(fit.sigma_px) and fit.sigma_px < params.sampling_limit_px:
+        # Checked last, so this reason is reserved for profiles that passed
+        # every quality gate and were lost purely to undersampling -- making
+        # the reported count exactly "measurements the pixel grid cost you".
+        # Ordering is safe: a sampling-limited profile sails through R-squared
+        # and S/N (an erf fits a smooth interpolation ramp almost perfectly),
+        # which is precisely why those gates cannot catch this condition.
+        return False, f"sampling-limited: {fit.sigma_px:.2f} px < {params.sampling_limit_px:g} px"
     return True, None
 
 
@@ -152,13 +160,14 @@ class AnalysisResult:
     # the spread of individual profile measurements)
     resolution_ci_low_nm: float = float("nan")
     resolution_ci_high_nm: float = float("nan")
-    # Accepted profiles whose fitted width is below the pixel sampling limit
-    # (see AnalysisParams.sampling_limit_px). These are still included in the
-    # statistics; the flags exist so the condition can be surfaced.
-    # `median_sampling_limited` is the actionable one: it says the reported
-    # median itself sits below what the pixel grid can resolve.
+    # Profiles EXCLUDED from the statistics because their fitted width fell
+    # below the pixel sampling limit (see AnalysisParams.sampling_limit_px).
+    # `sampling_limited_dominant` means most fitted edges were unresolvable,
+    # so the surviving measurement is a censored subset -- the instrument is
+    # likely finer than this image can measure, and the reported figure
+    # therefore overstates (i.e. is worse than) the true edge width.
     n_sampling_limited: int = 0
-    median_sampling_limited: bool = False
+    sampling_limited_dominant: bool = False
     # the threshold these flags were evaluated against, so the result is
     # self-describing in reports and survives calibrate_result
     sampling_limit_px: float = 1.0
@@ -421,11 +430,13 @@ def _assemble_result(
         median_nm = mad_nm = float("nan")
     ci_low_nm, ci_high_nm = bootstrap_median_ci(resolutions)
 
-    # sampling-limit diagnostics (reporting only -- nothing is excluded)
-    sigma_px = np.array([p.fit.sigma_px for p in accepted], dtype=float)
-    finite = sigma_px[np.isfinite(sigma_px)]
-    n_sampling_limited = int(np.count_nonzero(finite < sampling_limit_px))
-    median_sampling_limited = bool(finite.size and np.median(finite) < sampling_limit_px)
+    # profiles excluded for being below the sampling limit, and whether they
+    # dominate what was fitted (i.e. the surviving set is a censored subset)
+    n_sampling_limited = sum(
+        1 for p in profile_results if p.reject_reason and p.reject_reason.startswith("sampling-limited")
+    )
+    n_fitted = len(accepted) + n_sampling_limited
+    sampling_limited_dominant = bool(n_fitted and n_sampling_limited > n_fitted / 2)
 
     return AnalysisResult(
         image_path=path,
@@ -437,7 +448,7 @@ def _assemble_result(
         resolution_ci_low_nm=ci_low_nm,
         resolution_ci_high_nm=ci_high_nm,
         n_sampling_limited=n_sampling_limited,
-        median_sampling_limited=median_sampling_limited,
+        sampling_limited_dominant=sampling_limited_dominant,
         sampling_limit_px=sampling_limit_px,
         n_profiles_analyzed=len(accepted),
         n_edge_points_found=n_edge_points,

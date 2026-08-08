@@ -53,19 +53,21 @@ class ResultsPanel(QGroupBox):
         self._labels["edge_points_found"].setText(str(result.n_edge_points_found))
         self._labels["snr_mean"].setText(f"{result.snr_mean:.1f}")
         self._labels["asymmetry_mean"].setText(f"{result.asymmetry_mean:.3f}")
-        share = result.n_sampling_limited / max(result.n_profiles_analyzed, 1)
+        fitted = result.n_profiles_analyzed + result.n_sampling_limited
+        share = result.n_sampling_limited / max(fitted, 1)
         sampling = self._labels["sampling"]
-        if result.median_sampling_limited:
+        if result.sampling_limited_dominant:
             sampling.setText(
-                f"⚠ below the {result.sampling_limit_px:g} px sampling limit "
-                f"({result.n_sampling_limited} of {result.n_profiles_analyzed} profiles) — "
-                "this figure reflects the pixel grid, not the instrument; increase magnification"
+                f"⚠ {result.n_sampling_limited} of {fitted} profiles ({share:.0%}) excluded: "
+                f"finer than the {result.sampling_limit_px:g} px pixel grid can resolve. "
+                "This figure comes from the resolvable minority and overstates the edge width — "
+                "increase magnification"
             )
             sampling.setStyleSheet("color: #b00020; font-weight: bold;")
         elif result.n_sampling_limited:
             sampling.setText(
-                f"{result.n_sampling_limited} of {result.n_profiles_analyzed} profiles "
-                f"({share:.0%}) below the {result.sampling_limit_px:g} px sampling limit"
+                f"{result.n_sampling_limited} of {fitted} profiles ({share:.0%}) excluded as "
+                f"sampling-limited (< {result.sampling_limit_px:g} px)"
             )
             sampling.setStyleSheet("color: gray;")
         else:
