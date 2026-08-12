@@ -8,17 +8,20 @@ from typing import Optional
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QMainWindow,
     QMessageBox,
     QProgressDialog,
     QPushButton,
+    QScrollArea,
     QSlider,
     QSplitter,
     QTableWidget,
@@ -51,6 +54,10 @@ IMAGE_SUFFIXES = {".tif", ".tiff", ".png", ".jpg", ".jpeg", ".bmp"}
 # the raw result is cached and stricter settings are applied as an instant
 # post-hoc refilter (see analyze.refilter_result).
 _LENIENT_FLOOR = 100
+
+# Keeps the batch list usable (a header plus a few rows) however the
+# splitter above it is dragged or however short the window gets.
+_BATCH_TABLE_MIN_HEIGHT = 140
 
 # Edge-width criterion presets offered in the main-screen dropdown.
 _CRITERION_PRESETS = (
@@ -100,9 +107,15 @@ class MainWindow(QMainWindow):
         mode_layout = QVBoxLayout(mode_group)
         mode_row = QHBoxLayout()
         mode_row.addWidget(self.mode_combo)
-        mode_row.addWidget(QLabel("edge = generic edges · particles = round particles"))
         mode_row.addStretch()
         mode_layout.addLayout(mode_row)
+        # on its own wrapped line rather than beside the combo: an unwrappable
+        # label sets a floor on the whole control column's width, which the
+        # splitter then cannot be dragged below without clipping it
+        mode_note = QLabel("edge = generic edges · particles = round particles")
+        mode_note.setWordWrap(True)
+        mode_note.setStyleSheet("color: gray; font-size: 10px;")
+        mode_layout.addWidget(mode_note)
         criterion_row = QHBoxLayout()
         criterion_row.addWidget(QLabel("Edge-width criterion:"))
         criterion_row.addWidget(self.criterion_combo)
@@ -178,7 +191,10 @@ class MainWindow(QMainWindow):
         sensitivity_note.setStyleSheet("color: gray; font-size: 10px;")
         sensitivity_layout.addWidget(sensitivity_note)
 
-        self.show_rejected_checkbox = QCheckBox("Show rejected points (grey; click one to see why)")
+        # kept short for the same reason as mode_note above; the detail lives
+        # in the tooltip rather than in an unwrappable checkbox label
+        self.show_rejected_checkbox = QCheckBox("Show rejected points (grey)")
+        self.show_rejected_checkbox.setToolTip("Click a rejected point to see why it was rejected.")
         self.show_rejected_checkbox.toggled.connect(lambda _checked: self._render_current_result())
         sensitivity_layout.addWidget(self.show_rejected_checkbox)
 
@@ -186,18 +202,65 @@ class MainWindow(QMainWindow):
         self.batch_table.setHorizontalHeaderLabels(["Image", "Resolution (median)", "Profiles"])
         self.batch_table.itemSelectionChanged.connect(self._on_batch_row_selected)
         self.batch_table.setMinimumWidth(280)
-        self.batch_table.horizontalHeader().setStretchLastSection(True)
-        self.batch_table.resizeColumnsToContents()
+        self.batch_table.setMinimumHeight(_BATCH_TABLE_MIN_HEIGHT)
+        # One click selects one whole image row. The Qt defaults (SelectItems
+        # + ExtendedSelection) are wrong for this table on both counts:
+        # _on_batch_row_selected reads selectionModel().selectedRows(), which
+        # only reports rows whose every column is selected, so a plain click
+        # on a cell selected nothing and did nothing -- the user had to drag
+        # across all three columns, and such a drag easily spans rows, which
+        # then loaded whichever row happened to be topmost.
+        self.batch_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.batch_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        # read-only: these cells are analysis output, and an accidental
+        # in-place edit of the Image cell would break the name -> result
+        # lookup that row updates and CSV export depend on
+        self.batch_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        # Stable column widths. The file name takes the slack (it is the long
+        # value); the two numeric columns keep a fixed default the user can
+        # still drag. Re-fitting columns to contents as each result arrived
+        # made the table shift sideways under the pointer mid-batch.
+        header = self.batch_table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.Interactive)
+        header.setSectionResizeMode(2, QHeaderView.Interactive)
+        self.batch_table.setColumnWidth(1, 115)
+        self.batch_table.setColumnWidth(2, 62)
 
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.addWidget(mode_group)
-        right_layout.addWidget(self.calibration_group)
-        right_layout.addWidget(region_group)
-        right_layout.addWidget(sensitivity_group)
-        right_layout.addWidget(self.results_panel)
-        right_layout.addWidget(QLabel("Batch results (select a row to view):"))
-        right_layout.addWidget(self.batch_table)
+        # The controls stack scrolls, so it can be squeezed without clipping,
+        # and a splitter (rather than a plain layout) divides it from the
+        # batch table -- otherwise the table got only the leftover height,
+        # which collapsed to near nothing on a short window or whenever the
+        # manual-calibration group appeared, with no way to drag it back.
+        controls = QWidget()
+        controls_layout = QVBoxLayout(controls)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.addWidget(mode_group)
+        controls_layout.addWidget(self.calibration_group)
+        controls_layout.addWidget(region_group)
+        controls_layout.addWidget(sensitivity_group)
+        controls_layout.addWidget(self.results_panel)
+        controls_layout.addStretch()
+
+        controls_scroll = QScrollArea()
+        controls_scroll.setWidgetResizable(True)
+        controls_scroll.setWidget(controls)
+        controls_scroll.setFrameShape(QScrollArea.NoFrame)
+
+        batch_panel = QWidget()
+        batch_layout = QVBoxLayout(batch_panel)
+        batch_layout.setContentsMargins(0, 0, 0, 0)
+        batch_layout.addWidget(QLabel("Batch results (select a row to view):"))
+        batch_layout.addWidget(self.batch_table)
+
+        right_panel = QSplitter(Qt.Vertical)
+        right_panel.addWidget(controls_scroll)
+        right_panel.addWidget(batch_panel)
+        right_panel.setStretchFactor(0, 3)
+        right_panel.setStretchFactor(1, 2)
+        # never let a drag collapse either half to zero
+        right_panel.setChildrenCollapsible(False)
 
         self.image_toolbar = NavigationToolbar2QT(self.image_canvas, self)
         canvas_panel = QWidget()
@@ -211,6 +274,9 @@ class MainWindow(QMainWindow):
         splitter.addWidget(right_panel)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 1)
+        # start the control column wide enough for its group boxes; stretch
+        # factors alone left it narrow enough to elide the batch file names
+        splitter.setSizes([760, 340])
         self.setCentralWidget(splitter)
 
         self._build_menus()
@@ -603,17 +669,25 @@ class MainWindow(QMainWindow):
         if row is None:
             row = self.batch_table.rowCount()
             self.batch_table.insertRow(row)
-        self.batch_table.setItem(row, 0, QTableWidgetItem(name))
+        name_item = QTableWidgetItem(name)
+        # the column is narrow enough to elide real file names, so keep the
+        # full one reachable on hover
+        name_item.setToolTip(name)
+        self.batch_table.setItem(row, 0, name_item)
         self.batch_table.setItem(row, 1, QTableWidgetItem(f"{result.resolution_median_nm:.2f} {result.units}"))
         self.batch_table.setItem(row, 2, QTableWidgetItem(str(result.n_profiles_analyzed)))
-        self.batch_table.resizeColumnsToContents()
 
     def _on_batch_file_failed(self, name: str, message: str) -> None:
         row = self.batch_table.rowCount()
         self.batch_table.insertRow(row)
-        self.batch_table.setItem(row, 0, QTableWidgetItem(name))
+        name_item = QTableWidgetItem(name)
+        name_item.setToolTip(name)
+        self.batch_table.setItem(row, 0, name_item)
         self.batch_table.setItem(row, 1, QTableWidgetItem("error"))
-        self.batch_table.setItem(row, 2, QTableWidgetItem(message))
+        # the message rarely fits the narrow last column
+        message_item = QTableWidgetItem(message)
+        message_item.setToolTip(message)
+        self.batch_table.setItem(row, 2, message_item)
 
     def _on_batch_finished(self) -> None:
         if self._progress_dialog is not None:

@@ -12,7 +12,9 @@ import matplotlib
 
 matplotlib.use("QtAgg")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QAbstractItemView, QApplication, QSplitter
 
 from probesize.analyze import AnalysisParams, analyze_image
 from probesize.gui.main_window import MainWindow
@@ -278,6 +280,88 @@ def test_mode_selector_reanalyzes_single_image_and_invalidates_cache(qapp, sampl
     assert win.params.detection_mode == "particles"
     assert win._raw_result is None  # structural change invalidated the cache
     assert reruns == [(Path(sample_result.image_path), "particles")]
+
+
+def _batch_window(sample_result, names=("a.tif", "b.tif", "c.tif")):
+    win = MainWindow()
+    for name in names:
+        win._on_batch_file_done(name, _result_with_path(sample_result, name))
+    win.show()  # the table needs a real geometry for visualRect/mouse clicks
+    return win
+
+
+def _click_cell(table, row, column, modifier=Qt.NoModifier):
+    """Click the centre of one cell the way a user would, rather than calling
+    selectRow() -- the bug this guards was invisible to selectRow()."""
+    center = table.visualRect(table.model().index(row, column)).center()
+    QTest.mouseClick(table.viewport(), Qt.LeftButton, modifier, center)
+
+
+@pytest.mark.parametrize("column", [0, 1, 2])
+def test_clicking_any_batch_cell_loads_that_image(qapp, sample_result, column):
+    # regression: the table used Qt's default SelectItems behaviour, so a
+    # click selected a single cell; _on_batch_row_selected reads
+    # selectedRows(), which only reports fully-selected rows, so clicking a
+    # batch entry silently did nothing at all
+    win = _batch_window(sample_result)
+
+    _click_cell(win.batch_table, 1, column)
+
+    assert [i.row() for i in win.batch_table.selectionModel().selectedRows()] == [1]
+    assert win._current_batch_name == "b.tif"
+
+
+def test_batch_table_cannot_select_more_than_one_image(qapp, sample_result):
+    # regression: the default ExtendedSelection let a click-drag (the only
+    # gesture that used to select a whole row) run across several rows, and
+    # the handler then loaded whichever row came first rather than the one
+    # under the pointer
+    win = _batch_window(sample_result)
+
+    _click_cell(win.batch_table, 0, 0)
+    _click_cell(win.batch_table, 2, 0, modifier=Qt.ControlModifier)
+
+    assert [i.row() for i in win.batch_table.selectionModel().selectedRows()] == [2]
+    assert win._current_batch_name == "c.tif"
+
+
+def test_batch_table_is_read_only(qapp, sample_result):
+    # the Image cell is the key for row updates and CSV export; an accidental
+    # in-place edit would orphan that row's result
+    win = _batch_window(sample_result)
+    assert win.batch_table.editTriggers() == QAbstractItemView.NoEditTriggers
+
+
+def test_batch_column_widths_do_not_shift_as_results_arrive(qapp, sample_result):
+    # regression: every completed file re-fitted the columns to their
+    # contents, so the table jumped sideways under the pointer mid-batch
+    win = _batch_window(sample_result, names=("a.tif",))
+    widths = [win.batch_table.columnWidth(c) for c in (1, 2)]
+
+    win._on_batch_file_done(
+        "a_much_longer_file_name.tif",
+        _result_with_path(sample_result, "a_much_longer_file_name.tif"),
+    )
+
+    assert [win.batch_table.columnWidth(c) for c in (1, 2)] == widths
+
+
+def test_batch_table_can_be_resized_against_the_controls(qapp, sample_result):
+    # regression: the batch table shared a plain vertical layout with the
+    # control groups, so it got only the leftover height -- squeezed to
+    # near-nothing on a short window (or when the manual-calibration group
+    # appeared) with no way to drag it back
+    win = _batch_window(sample_result)
+    right_panel = win.centralWidget().widget(1)
+
+    assert isinstance(right_panel, QSplitter)
+    assert right_panel.orientation() == Qt.Vertical
+    assert right_panel.count() == 2
+    assert not right_panel.childrenCollapsible()
+
+    before = right_panel.sizes()
+    right_panel.setSizes([before[0] - 80, before[1] + 80])
+    assert right_panel.sizes() != before  # the divider actually moves
 
 
 def test_mode_change_reanalyzes_whole_batch(qapp, sample_result, monkeypatch):
