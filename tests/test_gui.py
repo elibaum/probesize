@@ -14,7 +14,7 @@ matplotlib.use("QtAgg")
 
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QAbstractItemView, QApplication, QSplitter
+from PySide6.QtWidgets import QAbstractItemView, QApplication
 
 from probesize.analyze import AnalysisParams, analyze_image
 from probesize.gui.main_window import MainWindow
@@ -344,103 +344,6 @@ def test_batch_column_widths_do_not_shift_as_results_arrive(qapp, sample_result)
     )
 
     assert [win.batch_table.columnWidth(c) for c in (1, 2)] == widths
-
-
-def test_batch_table_can_be_resized_against_the_controls(qapp, sample_result):
-    # regression: the batch table shared a plain vertical layout with the
-    # control groups, so it got only the leftover height -- squeezed to
-    # near-nothing on a short window (or when the manual-calibration group
-    # appeared) with no way to drag it back
-    win = _batch_window(sample_result)
-    right_panel = win.centralWidget().widget(1)
-
-    assert isinstance(right_panel, QSplitter)
-    assert right_panel.orientation() == Qt.Vertical
-    assert right_panel.count() == 2
-    assert not right_panel.childrenCollapsible()
-
-    before = right_panel.sizes()
-    right_panel.setSizes([before[0] - 80, before[1] + 80])
-    assert right_panel.sizes() != before  # the divider actually moves
-
-
-def test_each_control_group_is_its_own_resizable_section(qapp, sample_result):
-    win = _batch_window(sample_result)
-    splitter = win._controls_splitter
-
-    assert splitter.orientation() == Qt.Vertical
-    assert splitter.count() == len(win._control_sections) == 5
-    assert not splitter.childrenCollapsible()
-
-    # a divider actually moves height from one section to its neighbour
-    before = splitter.sizes()
-    sizes = list(before)
-    sizes[3] -= 60
-    sizes[4] += 60
-    splitter.setSizes(sizes)
-    after = splitter.sizes()
-    assert after != before
-    assert after[4] > before[4] and after[3] < before[3]
-
-
-def test_squeezed_control_section_scrolls_instead_of_clipping(qapp, sample_result):
-    # a section dragged below its content's natural height must scroll it,
-    # not cut it off -- that is also what lets the splitter shrink a section
-    # at all, since otherwise its minimum would be its full natural height
-    win = _batch_window(sample_result)
-    section, content = win._control_sections[-1]  # Results
-    natural = content.sizeHint().height()
-
-    sizes = list(win._controls_splitter.sizes())
-    sizes[4] = 60
-    sizes[0] += natural - 60
-    win._controls_splitter.setSizes(sizes)
-    qapp.processEvents()
-
-    assert section.height() < natural
-    assert content.height() >= natural  # full height kept inside the scroll area
-    assert section.verticalScrollBar().isVisible()
-
-
-def test_control_sections_can_be_squeezed_well_below_natural_height(qapp, sample_result):
-    # each section must be able to shrink far below its content, or the
-    # sum of the minimums exceeds the window and no divider can ever move
-    win = _batch_window(sample_result)
-
-    naturals = [content.sizeHint().height() for _section, content in win._control_sections]
-    minimums = [section.minimumHeight() for section, _content in win._control_sections]
-
-    assert all(low < natural for low, natural in zip(minimums, naturals))
-    assert sum(minimums) < sum(naturals) / 2
-
-
-def test_calibration_section_is_hidden_as_a_whole(qapp, sample_result, tmp_path):
-    # regression risk in wrapping each group in a section: hiding only the
-    # inner group would leave an empty section holding its space open
-    win = _batch_window(sample_result)
-    assert win._calibration_section.isHidden()
-    assert not win.calibration_group.isVisibleTo(win)
-
-    win.params.detection_mode = "edge"
-    win._on_analysis_finished(_uncalibrated_edge_result(tmp_path))
-
-    assert not win._calibration_section.isHidden()
-    assert win.calibration_group.isVisibleTo(win)
-
-
-def test_a_user_drag_survives_a_calibration_section_appearing(qapp, sample_result, tmp_path):
-    win = _batch_window(sample_result)
-    splitter = win._controls_splitter
-    sizes = list(splitter.sizes())
-    sizes[0] += 70
-    sizes[4] -= 70
-    splitter.setSizes(sizes)
-    win._on_control_sections_dragged(0, 0)  # what splitterMoved reports on a real drag
-    dragged = splitter.sizes()
-
-    win._sync_control_section_heights()
-
-    assert splitter.sizes() == dragged
 
 
 def test_mode_change_reanalyzes_whole_batch(qapp, sample_result, monkeypatch):

@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressDialog,
     QPushButton,
-    QScrollArea,
     QSlider,
     QSplitter,
     QTableWidget,
@@ -55,31 +54,10 @@ IMAGE_SUFFIXES = {".tif", ".tiff", ".png", ".jpg", ".jpeg", ".bmp"}
 # post-hoc refilter (see analyze.refilter_result).
 _LENIENT_FLOOR = 100
 
-# Keeps the batch list usable (a header plus a few rows) however the
-# splitter above it is dragged or however short the window gets.
+# Keeps the batch list usable (a header plus a few rows) however short the
+# window gets: it is last in the control column, so it is the widget that
+# gives up height first when the groups above it need room.
 _BATCH_TABLE_MIN_HEIGHT = 140
-
-# How far a control section can be squeezed by the splitter before it stops:
-# enough to keep its title and the drag handles either side of it reachable.
-_SECTION_MIN_HEIGHT = 56
-
-
-def _resizable_section(widget: QWidget) -> QScrollArea:
-    """Wrap a control group so it can be a resizable splitter section.
-
-    The group keeps its natural size inside a scroll area, so dragging a
-    section smaller than its contents scrolls them rather than cutting them
-    off. That is what gives the splitter room to work: without it every
-    section's minimum height would be its full natural height, the minimums
-    would sum to more than the window, and no divider could move at all.
-    """
-    area = QScrollArea()
-    area.setWidgetResizable(True)
-    area.setWidget(widget)
-    area.setFrameShape(QScrollArea.NoFrame)
-    area.setMinimumHeight(_SECTION_MIN_HEIGHT)
-    return area
-
 
 # Edge-width criterion presets offered in the main-screen dropdown.
 _CRITERION_PRESETS = (
@@ -107,9 +85,6 @@ class MainWindow(QMainWindow):
         self._histogram_dialog: Optional[HistogramDialog] = None
         self._polar_dialog: Optional[PolarDialog] = None
         self._last_rendered_path: Optional[Path] = None
-        # see _sync_control_section_heights: stop auto-sizing the control
-        # sections as soon as the user has dragged one of their dividers
-        self._sections_user_sized = False
 
         self.image_canvas = ImageCanvas()
         self.image_canvas.point_clicked.connect(self._on_point_clicked)
@@ -132,15 +107,9 @@ class MainWindow(QMainWindow):
         mode_layout = QVBoxLayout(mode_group)
         mode_row = QHBoxLayout()
         mode_row.addWidget(self.mode_combo)
+        mode_row.addWidget(QLabel("edge = generic edges · particles = round particles"))
         mode_row.addStretch()
         mode_layout.addLayout(mode_row)
-        # on its own wrapped line rather than beside the combo: an unwrappable
-        # label sets a floor on the whole control column's width, which the
-        # splitter then cannot be dragged below without clipping it
-        mode_note = QLabel("edge = generic edges · particles = round particles")
-        mode_note.setWordWrap(True)
-        mode_note.setStyleSheet("color: gray; font-size: 10px;")
-        mode_layout.addWidget(mode_note)
         criterion_row = QHBoxLayout()
         criterion_row.addWidget(QLabel("Edge-width criterion:"))
         criterion_row.addWidget(self.criterion_combo)
@@ -173,6 +142,7 @@ class MainWindow(QMainWindow):
         calibration_note.setWordWrap(True)
         calibration_note.setStyleSheet("color: gray; font-size: 10px;")
         calibration_layout.addWidget(calibration_note)
+        self.calibration_group.setVisible(False)
 
         # region of interest: restrict measurements to a user-drawn rectangle
         self.region_edit_checkbox = QCheckBox("Edit region (drag on image)")
@@ -215,10 +185,7 @@ class MainWindow(QMainWindow):
         sensitivity_note.setStyleSheet("color: gray; font-size: 10px;")
         sensitivity_layout.addWidget(sensitivity_note)
 
-        # kept short for the same reason as mode_note above; the detail lives
-        # in the tooltip rather than in an unwrappable checkbox label
-        self.show_rejected_checkbox = QCheckBox("Show rejected points (grey)")
-        self.show_rejected_checkbox.setToolTip("Click a rejected point to see why it was rejected.")
+        self.show_rejected_checkbox = QCheckBox("Show rejected points (grey; click one to see why)")
         self.show_rejected_checkbox.toggled.connect(lambda _checked: self._render_current_result())
         sensitivity_layout.addWidget(self.show_rejected_checkbox)
 
@@ -252,61 +219,15 @@ class MainWindow(QMainWindow):
         self.batch_table.setColumnWidth(1, 115)
         self.batch_table.setColumnWidth(2, 62)
 
-        batch_panel = QWidget()
-        batch_layout = QVBoxLayout(batch_panel)
-        batch_layout.setContentsMargins(0, 0, 0, 0)
-        batch_layout.addWidget(QLabel("Batch results (select a row to view):"))
-        batch_layout.addWidget(self.batch_table)
-
-        # Every group on this side is its own splitter section, so each can
-        # be given more or (via the scroll area in _resizable_section) less
-        # room than its natural height by dragging the divider above or
-        # below it. A plain stacked layout gave each group exactly its
-        # natural height and the leftovers to whatever was last.
-        self._calibration_section = _resizable_section(self.calibration_group)
-        self._calibration_section.setVisible(False)  # shown only when uncalibrated
-        self._control_sections = [
-            (_resizable_section(mode_group), mode_group),
-            (self._calibration_section, self.calibration_group),
-            (_resizable_section(region_group), region_group),
-            (_resizable_section(sensitivity_group), sensitivity_group),
-            (_resizable_section(self.results_panel), self.results_panel),
-        ]
-
-        self._controls_splitter = QSplitter(Qt.Vertical)
-        for section, _content in self._control_sections:
-            self._controls_splitter.addWidget(section)
-        # never let a drag collapse a section to nothing -- it would leave no
-        # handle to drag it back out with
-        self._controls_splitter.setChildrenCollapsible(False)
-        self._controls_splitter.splitterMoved.connect(self._on_control_sections_dragged)
-
-        # The splitter is kept at least as tall as its sections' natural
-        # heights (see _sync_control_section_heights) and scrolls as a whole
-        # when the window is shorter than that. Sizing it to the viewport
-        # instead would squeeze every section below its natural height at
-        # ordinary window sizes, putting a scrollbar on each one.
-        self._controls_scroll = QScrollArea()
-        self._controls_scroll.setWidgetResizable(True)
-        self._controls_scroll.setWidget(self._controls_splitter)
-        self._controls_scroll.setFrameShape(QScrollArea.NoFrame)
-        # Don't let the column be dragged narrower than its widest group
-        # needs. Each section scrolls on its own now, so without this the
-        # narrow groups stay fine while the widest one (manual calibration,
-        # whose spin box and Apply button share a row) grows a horizontal
-        # scrollbar -- which then costs height and forces a vertical one too.
-        widest = max(content.minimumSizeHint().width() for _section, content in self._control_sections)
-        scrollbars = 2 * self._controls_scroll.verticalScrollBar().sizeHint().width()
-        self._controls_scroll.setMinimumWidth(widest + scrollbars)
-        self._sync_control_section_heights()
-
-        right_panel = QSplitter(Qt.Vertical)
-        right_panel.addWidget(self._controls_scroll)
-        right_panel.addWidget(batch_panel)
-        right_panel.setStretchFactor(0, 3)
-        right_panel.setStretchFactor(1, 2)
-        # never let a drag collapse the controls or the batch list to zero
-        right_panel.setChildrenCollapsible(False)
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.addWidget(mode_group)
+        right_layout.addWidget(self.calibration_group)
+        right_layout.addWidget(region_group)
+        right_layout.addWidget(sensitivity_group)
+        right_layout.addWidget(self.results_panel)
+        right_layout.addWidget(QLabel("Batch results (select a row to view):"))
+        right_layout.addWidget(self.batch_table)
 
         self.image_toolbar = NavigationToolbar2QT(self.image_canvas, self)
         canvas_panel = QWidget()
@@ -320,9 +241,6 @@ class MainWindow(QMainWindow):
         splitter.addWidget(right_panel)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 1)
-        # start the control column wide enough for its group boxes; stretch
-        # factors alone left it narrow enough to elide the batch file names
-        splitter.setSizes([760, 340])
         self.setCentralWidget(splitter)
 
         self._build_menus()
@@ -518,43 +436,10 @@ class MainWindow(QMainWindow):
             return calibrate_result(raw, target)
         return raw
 
-    def _on_control_sections_dragged(self, _pos: int, _index: int) -> None:
-        self._sections_user_sized = True
-
-    def _sync_control_section_heights(self) -> None:
-        """Give every visible control section its natural height, and hold
-        the splitter to at least that total so the column scrolls when the
-        window is too short for all of them.
-
-        Pinning the minimum is what keeps the dividers useful: a drag then
-        trades height between two sections -- the one that shrinks scrolls
-        its own contents -- rather than squeezing every section at once,
-        which is what left each of them with its own scrollbar.
-        """
-        natural = [
-            0 if section.isHidden() else content.sizeHint().height()
-            for section, content in self._control_sections
-        ]
-        visible = sum(1 for height in natural if height)
-        if not visible:
-            return
-        handles = self._controls_splitter.handleWidth() * max(visible - 1, 0)
-        self._controls_splitter.setMinimumHeight(sum(natural) + handles)
-        # Only until the user takes over: re-imposing natural heights after
-        # that would silently undo whatever they dragged.
-        if not self._sections_user_sized:
-            self._controls_splitter.setSizes(natural)
-
     def _update_calibration_group(self) -> None:
         result = self.current_result
         show = result is not None and result.calibration in ("uncalibrated", "fallback")
-        # the whole splitter section, not just the group inside it -- hiding
-        # only the group would leave an empty section holding space open
-        was_shown = not self._calibration_section.isHidden()
-        self._calibration_section.setVisible(show)
-        if show != was_shown:
-            # one more (or one fewer) section to find natural height for
-            self._sync_control_section_heights()
+        self.calibration_group.setVisible(show)
         if show and result.calibration == "fallback":
             self.calibration_spin.setValue(result.pixel_size_nm)
 

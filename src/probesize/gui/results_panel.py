@@ -11,10 +11,6 @@ class ResultsPanel(QGroupBox):
     def __init__(self):
         super().__init__("Results")
         layout = QFormLayout(self)
-        # let a label drop onto its own line when the panel is narrow;
-        # side-by-side rows would otherwise set a wide minimum width for the
-        # whole control column, which the main splitter cannot be dragged below
-        layout.setRowWrapPolicy(QFormLayout.WrapLongRows)
         self._labels = {
             "resolution_median": QLabel("--"),
             "resolution_ci": QLabel("--"),
