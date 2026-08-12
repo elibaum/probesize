@@ -43,7 +43,7 @@ command-line tool, or a Python library.
 Requires Python 3.9+.
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/elibaum/probesize.git
 cd probesize
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[gui]"          # omit [gui] for the CLI/library only
@@ -164,7 +164,7 @@ Common options:
 | `--require-calibration` | fail on uncalibrated images instead of using px units |
 | `--region X0,Y0,X1,Y1` | restrict measurements to a rectangle (pixels) |
 | `--r-squared-min`, `--snr-min` | fit-acceptance thresholds |
-| `--sampling-limit-px` | warn below this fitted edge width (default 1 px; diagnostic only) |
+| `--sampling-limit-px` | exclude fits below this edge width (default 1 px; `0` disables) |
 | `-s` | print a single resolution line (for scripting) |
 
 Edge mode is tuned with `--min-spacing-px`, `--canny-sigma`,

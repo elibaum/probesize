@@ -54,13 +54,16 @@ class AnalysisParams:
     # image. Applied as a post-hoc acceptance check, so changing the region
     # only needs refilter_result, not a re-analysis.
     region: Optional[tuple[float, float, float, float]] = None
-    # Diagnostic (NOT acceptance) threshold: fitted edge widths below this
-    # many pixels are flagged as sampling-limited. An edge-spread function
-    # must span several pixels to be measurable -- below ~1 px the fit
-    # measures the pixel grid and the profile interpolation, not the
-    # specimen, and the R-squared/SN gates cannot detect it (an erf fits a
-    # smooth interpolation ramp almost perfectly). Such profiles are still
-    # reported; the remedy is more magnification / a finer pixel size.
+    # Acceptance threshold: profiles whose fitted edge width falls below this
+    # many pixels are rejected as sampling-limited and EXCLUDED from the
+    # statistics. An edge-spread function must span several pixels to be
+    # measurable -- below ~1 px the fit measures the pixel grid and the
+    # profile interpolation, not the specimen, and the R-squared/SN gates
+    # cannot detect it (an erf fits a smooth interpolation ramp almost
+    # perfectly), which is precisely why this width-in-pixels check exists.
+    # Excluded profiles are still counted and reported
+    # (AnalysisResult.n_sampling_limited); the remedy is more magnification /
+    # a finer pixel size. Set 0 to disable the check.
     sampling_limit_px: float = 1.0
 
 

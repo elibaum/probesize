@@ -57,7 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--sampling-limit-px",
         type=float,
         default=1.0,
-        help="warn when fitted edge widths fall below this many pixels (diagnostic only; nothing is excluded)",
+        help="exclude profiles whose fitted edge width falls below this many pixels, as unresolvable by the pixel grid (set 0 to disable)",
     )
     p.add_argument("--r-squared-min", type=float, default=0.85, help="minimum fit quality to accept a profile")
     p.add_argument("--snr-min", type=float, default=3.0, help="minimum signal-to-noise ratio to accept a profile")
